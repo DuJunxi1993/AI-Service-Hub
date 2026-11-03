@@ -2,20 +2,33 @@ import XCTest
 @testable import AiServiceHubCore
 
 final class ProcessInspectorTests: XCTestCase {
-    func testParsePgrepLine() {
-        let snapshot = ProcessInspector.parsePgrepLine("30228 4:41:00 /Users/me/.hermes/bin/hermes gateway run")
-        XCTAssertEqual(snapshot?.pid, 30228)
-        XCTAssertEqual(snapshot?.elapsed, "4:41:00")
-        XCTAssertEqual(snapshot?.command, "/Users/me/.hermes/bin/hermes gateway run")
+    func testParseProcessTable() {
+        let output = """
+          30228 /Users/me/.hermes/bin/hermes gateway run
+          47228 node /Users/djx/.npm-global/bin/dsh web --port 3080
+        """
+        let table = ProcessTable.parse(output)
+        XCTAssertEqual(table.entries.count, 2)
+        XCTAssertEqual(table.entries[0].pid, 30228)
+        XCTAssertEqual(table.entries[1].pid, 47228)
+        XCTAssertTrue(table.entries[1].command.contains("dsh web"))
     }
 
-    func testParsePgrepLineIgnoresPgrepItself() {
-        XCTAssertNil(ProcessInspector.parsePgrepLine("123 1:00 /usr/bin/pgrep -fl astrbot"))
+    func testProcessTableMatching() {
+        let table = ProcessTable.parse("""
+          1 /usr/bin/hermes gateway run
+          2 node /x/dsh web --port 3080
+          3 /bin/zsh
+        """)
+        XCTAssertEqual(table.matching(["dsh web"]).map(\.pid), [2])
+        XCTAssertEqual(table.matching(["hermes gateway"]).map(\.pid), [1])
+        XCTAssertTrue(table.matching([]).isEmpty)
+        XCTAssertTrue(table.matching(["nothing-matches"]).isEmpty)
     }
 
-    func testParsePgrepLineIgnoresGarbage() {
-        XCTAssertNil(ProcessInspector.parsePgrepLine(""))
-        XCTAssertNil(ProcessInspector.parsePgrepLine("no-pid-here"))
+    func testParseProcessTableIgnoresGarbage() {
+        XCTAssertTrue(ProcessTable.parse("").entries.isEmpty)
+        XCTAssertTrue(ProcessTable.parse("no-pid-here").entries.isEmpty)
     }
 
     func testParseListeningPorts() {

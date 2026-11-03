@@ -35,7 +35,8 @@ public enum DSHPreset {
                 .file(id: "dsh-skills", label: "Skills 管理器", path: "\(home)/dsh-skills-manager.log")
             ],
             openURL: URL(string: "http://127.0.0.1:\(port)"),
-            note: "DeepSeek Harness Web 控制台（只读监控）"
+            note: "DeepSeek Harness Web 控制台（只读监控）",
+            presetIdentifier: identifier
         )
     }
 }

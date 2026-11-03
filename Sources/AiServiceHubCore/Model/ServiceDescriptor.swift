@@ -26,6 +26,8 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
     public var openURL: URL?
     /// 备注
     public var note: String?
+    /// 若该服务来自内置预设，记录预设标识（用于避免重复安装与支持「恢复预设」）
+    public var presetIdentifier: String?
 
     public init(
         id: UUID = UUID(),
@@ -38,7 +40,8 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         probes: [Probe] = [],
         logSources: [LogSourceSpec] = [],
         openURL: URL? = nil,
-        note: String? = nil
+        note: String? = nil,
+        presetIdentifier: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -51,6 +54,7 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         self.logSources = logSources
         self.openURL = openURL
         self.note = note
+        self.presetIdentifier = presetIdentifier
     }
 
     /// 驱动方式（纯监控服务没有驱动）

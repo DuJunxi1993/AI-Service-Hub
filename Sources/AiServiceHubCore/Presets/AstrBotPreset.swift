@@ -72,7 +72,8 @@ public enum AstrBotPreset {
                 .file(id: "astrbot-log", label: "AstrBot 日志", path: logPath)
             ],
             openURL: URL(string: "http://localhost:\(webPort)"),
-            note: "AI 机器人框架"
+            note: "AI 机器人框架",
+            presetIdentifier: identifier
         )
     }
 }

@@ -223,6 +223,15 @@ struct SettingsSheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
 
+                    Button {
+                        settings.restoreBuiltinPresets()
+                    } label: {
+                        Label("恢复内置预设", systemImage: "arrow.uturn.backward")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
                     Spacer()
 
                     Button {

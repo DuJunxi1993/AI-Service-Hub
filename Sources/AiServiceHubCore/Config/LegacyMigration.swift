@@ -144,6 +144,7 @@ public enum LegacyMigration {
             logPath: logPath,
             dataDirectory: dataDirectory
         )
+        descriptor.presetIdentifier = AstrBotPreset.identifier
 
         // 启动模式
         let mode = defaults.string(forKey: Key.astrBotLaunchMode) ?? "uvToolRun"

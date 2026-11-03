@@ -11,10 +11,11 @@ public struct ProbeEvaluator: Sendable {
     }
 
     /// 执行一次探测
-    public func evaluate(_ probe: Probe) async -> ProbeResult {
+    /// - Parameter table: 本轮已枚举好的进程表；为空时自行枚举
+    public func evaluate(_ probe: Probe, table: ProcessTable? = nil) async -> ProbeResult {
         switch probe {
         case .processPattern(let pattern):
-            return await evaluateProcessPattern(pattern)
+            return await evaluateProcessPattern(pattern, table: table)
         case .tcpPort(let port):
             return await evaluatePort(port)
         case .httpReachability(let urlString):
@@ -30,8 +31,13 @@ public struct ProbeEvaluator: Sendable {
 
     // MARK: - 各类探测
 
-    private func evaluateProcessPattern(_ pattern: String) async -> ProbeResult {
-        let processes = await inspector.allProcesses(matching: [pattern])
+    private func evaluateProcessPattern(_ pattern: String, table: ProcessTable?) async -> ProbeResult {
+        let processes: [ProcessSnapshot]
+        if let table {
+            processes = table.matching([pattern])
+        } else {
+            processes = await inspector.allProcesses(matching: [pattern])
+        }
         guard let first = processes.first else {
             return ProbeResult(label: "进程", state: .failed, summary: "未运行")
         }
@@ -40,7 +46,7 @@ public struct ProbeEvaluator: Sendable {
             groups.append(DetailGroup(
                 title: "同名进程",
                 rows: processes.map {
-                    DetailRow(label: "PID \($0.pid)", value: $0.elapsed)
+                    DetailRow(label: "PID \($0.pid)", value: $0.command)
                 }
             ))
         }

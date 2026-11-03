@@ -34,6 +34,8 @@ public struct Preferences: Codable, Sendable, Equatable {
     public var sidebarOrder: [UUID]
     /// 当前选中的服务
     public var selectedServiceID: UUID?
+    /// 被用户移除的内置预设（不再自动装回）
+    public var dismissedPresetIDs: [String]
 
     public init(
         themeMode: ThemeMode = .system,
@@ -43,7 +45,8 @@ public struct Preferences: Codable, Sendable, Equatable {
         loginItemEnabled: Bool = false,
         autoStartAllServices: Bool = true,
         sidebarOrder: [UUID] = [],
-        selectedServiceID: UUID? = nil
+        selectedServiceID: UUID? = nil,
+        dismissedPresetIDs: [String] = []
     ) {
         self.themeMode = themeMode
         self.pollingIntervalSeconds = pollingIntervalSeconds
@@ -53,6 +56,21 @@ public struct Preferences: Codable, Sendable, Equatable {
         self.autoStartAllServices = autoStartAllServices
         self.sidebarOrder = sidebarOrder
         self.selectedServiceID = selectedServiceID
+        self.dismissedPresetIDs = dismissedPresetIDs
+    }
+
+    // 手写解码：新增字段在旧配置文件里缺失时取默认值
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        themeMode = try container.decodeIfPresent(ThemeMode.self, forKey: .themeMode) ?? .system
+        pollingIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollingIntervalSeconds) ?? 5
+        enableNotifications = try container.decodeIfPresent(Bool.self, forKey: .enableNotifications) ?? true
+        startMinimized = try container.decodeIfPresent(Bool.self, forKey: .startMinimized) ?? false
+        loginItemEnabled = try container.decodeIfPresent(Bool.self, forKey: .loginItemEnabled) ?? false
+        autoStartAllServices = try container.decodeIfPresent(Bool.self, forKey: .autoStartAllServices) ?? true
+        sidebarOrder = try container.decodeIfPresent([UUID].self, forKey: .sidebarOrder) ?? []
+        selectedServiceID = try container.decodeIfPresent(UUID.self, forKey: .selectedServiceID)
+        dismissedPresetIDs = try container.decodeIfPresent([String].self, forKey: .dismissedPresetIDs) ?? []
     }
 }
 

@@ -110,16 +110,40 @@ final class AppSettings: ObservableObject {
         ]
     }
 
-    /// 确保内置预设存在（用户删除后不自动加回来，只在首次启动时补齐）
+    /// 内置预设
+    static func builtinPresets() -> [ServiceDescriptor] {
+        [
+            AstrBotPreset.makeDescriptor(),
+            HermesPreset.makeDescriptor(),
+            DSHPreset.makeDescriptor()
+        ]
+    }
+
+    /// 确保内置预设存在
+    ///
+    /// 已被用户主动移除的预设（记录在 `dismissedPresetIDs`）不会被装回。
     private func ensureBuiltinPresets() {
-        let existing = Set(services.map(\.name))
+        let installed = Set(services.compactMap(\.presetIdentifier))
+        let dismissed = Set(config.preferences.dismissedPresetIDs)
+
         var added: [ServiceDescriptor] = []
-        if !existing.contains("AstrBot") {
-            added.append(AstrBotPreset.makeDescriptor())
+        for preset in Self.builtinPresets() {
+            guard let identifier = preset.presetIdentifier else { continue }
+            guard !installed.contains(identifier) else { continue }
+            guard !dismissed.contains(identifier) else { continue }
+            added.append(preset)
         }
         guard !added.isEmpty else { return }
         services.append(contentsOf: added)
         sidebarOrder.append(contentsOf: added.map(\.id))
+        AppLog.info("已安装内置预设：\(added.map(\.name).joined(separator: ", "))")
+    }
+
+    /// 恢复全部内置预设（清空移除记录）
+    func restoreBuiltinPresets() {
+        config.preferences.dismissedPresetIDs = []
+        persist()
+        ensureBuiltinPresets()
     }
 
     // MARK: - 查询
@@ -166,12 +190,20 @@ final class AppSettings: ObservableObject {
     }
 
     /// 删除一个服务
+    ///
+    /// 如果是内置预设，记录到 `dismissedPresetIDs`，避免下次启动又被装回来。
     func remove(id: UUID) {
+        if let descriptor = services.first(where: { $0.id == id }),
+           let presetIdentifier = descriptor.presetIdentifier,
+           !config.preferences.dismissedPresetIDs.contains(presetIdentifier) {
+            config.preferences.dismissedPresetIDs.append(presetIdentifier)
+        }
         services.removeAll { $0.id == id }
         sidebarOrder.removeAll { $0 == id }
         if selectedServiceID == id {
             selectedServiceID = orderedServices.first?.id
         }
+        persist()
     }
 
     /// 调整侧边栏顺序

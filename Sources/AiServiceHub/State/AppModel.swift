@@ -79,13 +79,15 @@ final class AppModel: ObservableObject {
         defer { isRefreshing = false }
 
         await refreshContainers()
+        // 每轮只枚举一次进程表，供所有探测复用
+        let processTable = await ProcessInspector().snapshot()
         for descriptor in settings.orderedServices {
-            await refresh(descriptor)
+            await refresh(descriptor, processTable: processTable)
         }
     }
 
     /// 刷新单个服务
-    func refresh(_ descriptor: ServiceDescriptor) async {
+    func refresh(_ descriptor: ServiceDescriptor, processTable: ProcessTable? = nil) async {
         var snapshot = snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
 
         // 过渡态（启动中 / 停止中）不被轮询覆盖
@@ -96,7 +98,7 @@ final class AppModel: ObservableObject {
 
         var probeResults: [ProbeResult] = []
         for probe in descriptor.probes {
-            probeResults.append(await evaluator.evaluate(probe))
+            probeResults.append(await evaluator.evaluate(probe, table: processTable))
         }
         snapshot.probeResults = probeResults
 

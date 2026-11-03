@@ -34,7 +34,8 @@ public enum HermesPreset {
                 .file(id: "hermes-agent", label: "Agent", path: "\(home)/logs/agent.log")
             ],
             openURL: nil,
-            note: "消息网关与 Agent 运行时（只读监控）"
+            note: "消息网关与 Agent 运行时（只读监控）",
+            presetIdentifier: identifier
         )
     }
 }

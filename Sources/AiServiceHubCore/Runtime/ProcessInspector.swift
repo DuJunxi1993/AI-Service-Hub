@@ -5,20 +5,71 @@ import Darwin
 public struct ProcessSnapshot: Sendable, Equatable {
     public let pid: pid_t
     public let command: String
-    public let elapsed: String
     public let startTimeToken: String?
 
-    public init(pid: pid_t, command: String, elapsed: String, startTimeToken: String?) {
+    public init(pid: pid_t, command: String, startTimeToken: String?) {
         self.pid = pid
         self.command = command
-        self.elapsed = elapsed
         self.startTimeToken = startTimeToken
+    }
+}
+
+/// 一次进程表枚举的结果
+///
+/// 本轮重构的一个关键教训：macOS 27 上的 `pgrep -f` 会漏掉某些进程
+/// （实测漏掉了由 GUI app 派生的 `dsh web`），而 `ps -A` 能看到全部。
+/// 因此进程匹配统一走 `ps`，并且**每轮只枚举一次**，在内存里匹配所有服务。
+public struct ProcessTable: Sendable {
+    public struct Entry: Sendable, Equatable {
+        public let pid: pid_t
+        public let command: String
+
+        public init(pid: pid_t, command: String) {
+            self.pid = pid
+            self.command = command
+        }
+    }
+
+    public let entries: [Entry]
+
+    public init(entries: [Entry]) {
+        self.entries = entries
+    }
+
+    /// 找出命令行包含任一模式的进程
+    public func matching(_ patterns: [String]) -> [ProcessSnapshot] {
+        guard !patterns.isEmpty else { return [] }
+        var result: [ProcessSnapshot] = []
+        for entry in entries {
+            guard patterns.contains(where: { entry.command.contains($0) }) else { continue }
+            result.append(ProcessSnapshot(
+                pid: entry.pid,
+                command: entry.command,
+                startTimeToken: ProcessInspector.startTimeToken(pid: entry.pid)
+            ))
+        }
+        return result
+    }
+
+    /// 解析 `ps -A -o pid=,command=` 的输出
+    static func parse(_ output: String) -> ProcessTable {
+        var entries: [Entry] = []
+        entries.reserveCapacity(1024)
+        for line in output.split(separator: "\n") {
+            let trimmed = line.drop { $0 == " " }
+            guard let space = trimmed.firstIndex(where: { $0 == " " }),
+                  let pid = pid_t(trimmed[..<space]) else { continue }
+            let command = String(trimmed[trimmed.index(after: space)...])
+            guard !command.isEmpty else { continue }
+            entries.append(Entry(pid: pid, command: command))
+        }
+        return ProcessTable(entries: entries)
     }
 }
 
 /// 进程与端口探测
 ///
-/// 需要调用外部命令的部分都是异步的，避免在主线程上同步等待 `pgrep` / `lsof`。
+/// 需要调用外部命令的部分都是异步的，避免在主线程上同步等待。
 public struct ProcessInspector: Sendable {
     private let runner: CommandRunner
 
@@ -59,52 +110,26 @@ public struct ProcessInspector: Sendable {
         return current == startTimeToken
     }
 
-    // MARK: - 进程匹配
+    // MARK: - 进程枚举
 
-    /// 找出第一个匹配任一模式的进程
+    /// 枚举当前全部进程
+    public func snapshot() async -> ProcessTable {
+        let output = await runner.runIgnoringFailure(
+            "/bin/ps",
+            arguments: ["-A", "-o", "pid=,command="],
+            timeout: .seconds(10)
+        )
+        return ProcessTable.parse(output.stdout)
+    }
+
+    /// 找出匹配任一模式的进程（一次性枚举）
+    public func allProcesses(matching patterns: [String]) async -> [ProcessSnapshot] {
+        await snapshot().matching(patterns)
+    }
+
+    /// 找出第一个匹配的进程
     public func firstPID(matching patterns: [String]) async -> pid_t? {
         await allProcesses(matching: patterns).first?.pid
-    }
-
-    /// 找出所有匹配任一模式的进程
-    public func allProcesses(matching patterns: [String]) async -> [ProcessSnapshot] {
-        guard !patterns.isEmpty else { return [] }
-        var seen = Set<pid_t>()
-        var result: [ProcessSnapshot] = []
-
-        for pattern in patterns {
-            let output = await runner.runIgnoringFailure(
-                "/usr/bin/pgrep",
-                arguments: ["-fl", pattern],
-                timeout: .seconds(10)
-            )
-            for line in output.stdout.split(separator: "\n") {
-                guard let snapshot = Self.parsePgrepLine(String(line)) else { continue }
-                if seen.insert(snapshot.pid).inserted {
-                    result.append(snapshot)
-                }
-            }
-        }
-        return result
-    }
-
-    /// 解析 `pgrep -fl` 的一行：`PID ELAPSED COMMAND...`
-    static func parsePgrepLine(_ line: String) -> ProcessSnapshot? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, !trimmed.contains("pgrep") else { return nil }
-        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
-        guard parts.count >= 2, let pid = pid_t(parts[0]), pid > 0 else { return nil }
-        // pgrep -fl 的格式是：PID ELAPSED COMMAND
-        let elapsed = parts.count >= 3 ? String(parts[1]) : ""
-        let command = parts.count >= 3
-            ? parts.dropFirst(2).joined(separator: " ")
-            : String(parts[1])
-        return ProcessSnapshot(
-            pid: pid,
-            command: command,
-            elapsed: elapsed,
-            startTimeToken: startTimeToken(pid: pid)
-        )
     }
 
     // MARK: - 端口
