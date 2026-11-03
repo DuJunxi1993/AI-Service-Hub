@@ -1,4 +1,5 @@
 import Foundation
+import AiServiceHubCore
 
 /// 日志数据源
 enum LogSource: String, CaseIterable, Identifiable, Hashable {
@@ -55,57 +56,6 @@ enum LogLevel: String, CaseIterable, Identifiable, Hashable {
             return .debug
         }
         return .info
-    }
-}
-
-// MARK: - 行解析器（行缓冲）
-
-/// 把字节流按 \n 切分为完整行，保留未完成的半行
-final class LineParser: @unchecked Sendable {
-    private var buffer = Data()
-    private let lock = NSLock()
-
-    /// 喂入字节，返回完整行列表（剩余半行留在 buffer）
-    func feed(_ data: Data) -> [String] {
-        guard !data.isEmpty else { return [] }
-        lock.lock()
-        defer { lock.unlock() }
-        buffer.append(data)
-        return drainCompleteLinesLocked()
-    }
-
-    /// 强制 flush 剩余 buffer（如 EOF）
-    func flushRemaining() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !buffer.isEmpty else { return nil }
-        let line = String(data: buffer, encoding: .utf8) ?? ""
-        buffer.removeAll(keepingCapacity: true)
-        return line.isEmpty ? nil : line
-    }
-
-    private func drainCompleteLinesLocked() -> [String] {
-        var lines: [String] = []
-        var lastNewlineIndex: Int? = nil
-        for i in 0..<buffer.count {
-            if buffer[i] == 0x0A {
-                lastNewlineIndex = i
-            }
-        }
-        guard let lastIdx = lastNewlineIndex else { return [] }
-        let completeData = buffer.prefix(lastIdx + 1)
-        buffer = Data(buffer.suffix(from: lastIdx + 1))
-        var start = 0
-        for i in 0..<completeData.count {
-            if completeData[i] == 0x0A {
-                let lineData = completeData.subdata(in: start..<i)
-                if let str = String(data: lineData, encoding: .utf8) {
-                    lines.append(str)
-                }
-                start = i + 1
-            }
-        }
-        return lines
     }
 }
 
@@ -378,7 +328,7 @@ final class LogWatcher: ObservableObject {
                 if !allLines.isEmpty {
                     // 检测 WebUI URL（NapCat）
                     for line in allLines {
-                        if let url = WebUIURLDetector.extract(from: line, for: .napcat) {
+                        if let url = WebUIURLDetector.extract(from: line, for: .napCat) {
                             NotificationCenter.default.post(
                                 name: .webUIDetected,
                                 object: nil,

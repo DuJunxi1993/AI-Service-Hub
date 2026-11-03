@@ -1,4 +1,5 @@
 import Foundation
+import AiServiceHubCore
 
 /// AstrBot 进程生命周期管理器
 ///
@@ -203,7 +204,17 @@ final class AstrBotProcessManager {
                     userInfo: [NSLocalizedDescriptionKey: "请先在设置中输入自定义命令"]
                 )
             }
-            return ShellParser.parse(command)
+            // 自定义命令是直接 exec argv，不经 shell —— 含 shell 语法时明确报错，
+            // 而不是把 "cd" 当成可执行文件去跑。
+            if let reason = ShellArgumentParser.requiresShell(command) {
+                throw NSError(
+                    domain: "AstrBotProcessManager",
+                    code: 8,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "\(reason)：自定义命令模式直接执行程序、不经过 shell。请改用「可执行文件」模式并填写工作目录，或改用「启动脚本」模式。"]
+                )
+            }
+            return ShellArgumentParser.parse(command)
         case .executablePath:
             let path = settings.astrBotExecutablePath.trimmingCharacters(in: .whitespaces)
             guard !path.isEmpty else {

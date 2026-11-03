@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import UserNotifications
 import ServiceManagement
+import AiServiceHubCore
 
 /// 依赖真实 app bundle 的系统能力在「直接跑二进制」的开发模式下不可用：
 /// UNUserNotificationCenter / SMAppService 都需要 bundleProxyForCurrentProcess，

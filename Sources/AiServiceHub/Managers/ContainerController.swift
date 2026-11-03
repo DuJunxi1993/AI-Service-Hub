@@ -1,4 +1,5 @@
 import Foundation
+import AiServiceHubCore
 
 /// Docker 容器控制器（直接管理现成容器）
 @MainActor
@@ -101,21 +102,36 @@ final class ContainerController {
         return proc
     }
 
+    /// docker daemon 可用性的缓存
+    private static let availabilityLock = NSLock()
+    private static var availabilityCache: (available: Bool, timestamp: Date)?
+
     /// 检查 docker daemon 是否可用（5s 缓存）
     static func isDockerAvailable() -> Bool {
         let ttl: TimeInterval = 5
-        if let cached = ShellExecutor.dockerAvailableCache,
+
+        availabilityLock.lock()
+        if let cached = availabilityCache,
            Date().timeIntervalSince(cached.timestamp) < ttl {
+            availabilityLock.unlock()
             return cached.available
         }
+        availabilityLock.unlock()
+
         guard let docker = ShellExecutor.which("docker") else {
-            ShellExecutor.dockerAvailableCache = (false, Date())
+            setAvailability(false)
             return false
         }
         let result = ShellExecutor.runSync(docker, arguments: ["info"])
         let available = result.success
-        ShellExecutor.dockerAvailableCache = (available, Date())
+        setAvailability(available)
         return available
+    }
+
+    private static func setAvailability(_ available: Bool) {
+        availabilityLock.lock()
+        availabilityCache = (available, Date())
+        availabilityLock.unlock()
     }
 
     /// 从 compose 文件创建容器（兜底用）

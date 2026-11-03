@@ -1,4 +1,5 @@
 import Foundation
+import AiServiceHubCore
 
 /// AstrBot 进程控制器
 ///
@@ -54,54 +55,5 @@ final class AstrBotController {
     /// 停止 AstrBot（真正等待进程退出，由 processManager.stop() 处理 SIGTERM + 兜底 SIGKILL）
     func stop() async {
         await processManager.stop()
-    }
-}
-
-/// 简单的 Shell 命令解析器
-enum ShellParser {
-    /// 将 "ls -la /tmp" 解析为 ("/bin/ls", ["-la", "/tmp"])
-    static func parse(_ command: String) -> (executable: String, arguments: [String]) {
-        var tokens: [String] = []
-        var current = ""
-        var quote: Character? = nil
-        var iterator = command.makeIterator()
-
-        while let c = iterator.next() {
-            if let q = quote {
-                if c == q {
-                    quote = nil
-                } else {
-                    current.append(c)
-                }
-            } else {
-                if c == "\"" || c == "'" {
-                    quote = c
-                } else if c == " " || c == "\t" {
-                    if !current.isEmpty {
-                        tokens.append(current)
-                        current = ""
-                    }
-                } else {
-                    current.append(c)
-                }
-            }
-        }
-        if !current.isEmpty { tokens.append(current) }
-
-        guard let first = tokens.first else {
-            return ("/bin/echo", [])
-        }
-
-        // 第一个 token 解析为可执行文件
-        let executable: String
-        if first.hasPrefix("/") || first.hasPrefix("~") {
-            executable = (first as NSString).expandingTildeInPath
-        } else if let resolved = ShellExecutor.which(first) {
-            executable = resolved
-        } else {
-            executable = first
-        }
-
-        return (executable, Array(tokens.dropFirst()))
     }
 }

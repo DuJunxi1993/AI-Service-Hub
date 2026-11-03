@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Combine
 import AppKit
+import AiServiceHubCore
 
 /// 全局应用状态（协调所有服务）
 @MainActor
@@ -263,7 +264,7 @@ final class AppState: ObservableObject {
             if let cached = composePortCache[cacheKey] {
                 ports = cached
             } else {
-                ports = DockerComposePortParser.ports(
+                ports = ComposePortParser.ports(
                     fromComposePath: composePath,
                     serviceName: serviceName
                 )
@@ -478,7 +479,7 @@ final class AppState: ObservableObject {
 
         // 1. 尝试从 compose 文件解析
         if let composePath = findComposePath(forContainer: containerName) {
-            let ports = DockerComposePortParser.ports(
+            let ports = ComposePortParser.ports(
                 fromComposePath: composePath,
                 serviceName: serviceName
             )

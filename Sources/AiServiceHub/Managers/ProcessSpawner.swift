@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import AiServiceHubCore
 
 /// 进程守护启动器
 ///
