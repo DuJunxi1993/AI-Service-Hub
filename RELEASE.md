@@ -14,8 +14,10 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
-| `AiServiceHub-2.0.0.dmg` | 构建后由 CI 生成 | 见 `release-checksums.txt` |
-| `AiServiceHub-2.0.0-macOS.zip` | 构建后由 CI 生成 | 见 `release-checksums.txt` |
+| `AiServiceHub-2.0.0.dmg` | 1.5 MB | `138994729abf509d208aac1c1905289b64ab941983adeb0a4ca09cb90392dc50` |
+| `AiServiceHub-2.0.0-macOS.zip` | 1.0 MB | `46c954f62d93db7000392e5ab394a011f776d27a7f6c3dfea99cb41dae682b94` |
+
+下载：[GitHub Releases · macos-v2.0.0](https://github.com/DuJunxi1993/AstrbotLauncher/releases/tag/macos-v2.0.0)
 
 > v2.0.0 为架构性变更，**不兼容旧版配置格式**（会自动迁移）。
 > 变更详情见下方 [Changelog → v2.0.0](#v200--2026-11-03--更名--架构重构)。
@@ -135,6 +137,13 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 旧配置保留在磁盘上但不再读取。建议删除 `/Applications` 里的旧 app，
 并在新版设置中重新开启「开机自动启动」。
+
+**新图标**
+
+- 全新品牌图形，浅色 / 深色两套
+- Dock 图标跟随**系统**明暗：白天浅色、夜间深色
+  （macOS 的 bundle 图标不随外观切换，只有运行中的 Dock 图标能变）
+- 菜单栏改用品牌轮廓图（模板图，自动适配菜单栏明暗）
 
 **构建**
 
