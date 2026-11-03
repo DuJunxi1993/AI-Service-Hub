@@ -14,6 +14,21 @@ final class MenuBarController: ObservableObject {
 
     private init() {}
 
+    /// 菜单栏图标
+    ///
+    /// 用品牌图形（`menubar-icon.png`）而不是 SF Symbol。
+    /// 它是**模板图**（template image）：macOS 只取 alpha 通道，
+    /// 按菜单栏当前的明暗状态着色，所以一份资源就能适配两种外观。
+    private static func menuBarIcon() -> NSImage? {
+        if let url = Bundle.main.url(forResource: "menubar-icon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            return image
+        }
+        // 兜底：资源缺失时用系统符号
+        return NSImage(systemSymbolName: "bolt.circle.fill", accessibilityDescription: "AI Service Hub")
+    }
+
     func setup(appModel: AppModel, settings: AppSettings = .shared) {
         self.appModel = appModel
         self.settings = settings
@@ -21,7 +36,7 @@ final class MenuBarController: ObservableObject {
         if statusItem == nil {
             statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             if let button = statusItem?.button {
-                button.image = NSImage(systemSymbolName: "bolt.circle.fill", accessibilityDescription: "AI Service Hub")
+                button.image = Self.menuBarIcon()
                 button.image?.isTemplate = true
                 button.action = #selector(handleClick(_:))
                 button.target = self

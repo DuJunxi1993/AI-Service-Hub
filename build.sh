@@ -9,7 +9,8 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="AiServiceHub"
 APP_BUNDLE="$SCRIPT_DIR/${APP_NAME}.app"
-ICON_FILE="ai_service_hub.icns"
+ICON_FILE="Resources/ai_service_hub.icns"
+ICON_DARK_FILE="Resources/ai_service_hub_dark.icns"
 CONFIG="${CONFIG:-release}"
 
 # 选择可用的 Xcode（详见 scripts/xcode-env.sh）
@@ -37,11 +38,23 @@ cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
 # 复制图标（仅使用仓库内版本，保证构建可复现）
+# 浅色版是 bundle 图标（Finder / 未运行时），深色版供运行时切换 Dock 图标
 if [ -f "$ICON_FILE" ]; then
-    cp "$ICON_FILE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    cp "$ICON_FILE" "$APP_BUNDLE/Contents/Resources/ai_service_hub.icns"
     echo "    ✓ 图标已复制 ($ICON_FILE)"
 else
     echo "    ⚠️ 缺少 $ICON_FILE，bundle 将使用系统默认图标"
+fi
+
+if [ -f "$ICON_DARK_FILE" ]; then
+    cp "$ICON_DARK_FILE" "$APP_BUNDLE/Contents/Resources/ai_service_hub_dark.icns"
+    echo "    ✓ 深色图标已复制 ($ICON_DARK_FILE)"
+fi
+
+# 菜单栏图标（模板图，自动适配菜单栏明暗）
+if [ -f "Resources/menubar-icon.png" ]; then
+    cp "Resources/menubar-icon.png" "$APP_BUNDLE/Contents/Resources/menubar-icon.png"
+    echo "    ✓ 菜单栏图标已复制"
 fi
 
 # 设置可执行权限

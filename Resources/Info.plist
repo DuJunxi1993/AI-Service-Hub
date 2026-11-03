@@ -10,8 +10,6 @@
     <string>AiServiceHub</string>
     <key>CFBundleIconFile</key>
     <string>ai_service_hub</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.djx.aiservicehub</string>
     <key>CFBundleInfoDictionaryVersion</key>

@@ -8,7 +8,7 @@
 # detect_developer_dir —— 打印可用的 DEVELOPER_DIR，失败返回 1
 detect_developer_dir() {
     # 1. 用户已显式指定
-    if [ -n "$DEVELOPER_DIR" ] && [ -d "$DEVELOPER_DIR" ]; then
+    if [ -n "${DEVELOPER_DIR:-}" ] && [ -d "${DEVELOPER_DIR}" ]; then
         echo "$DEVELOPER_DIR"; return 0
     fi
     # 2. xcode-select 当前指向的若是完整 Xcode，直接用
