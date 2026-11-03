@@ -40,6 +40,11 @@ public final class LogTailer: @unchecked Sendable {
     private var offset: UInt64 = 0
     private var hasEmittedHistory = false
 
+    // 容器日志轮询状态
+    private var containerCursor: String?          // 上次取到的最后一条时间戳
+    private var containerSeenKeys: [String] = []  // 已输出行的指纹，用来去重
+    private var containerHasHistory = false
+
     public init(
         spec: LogSourceSpec,
         historyByteLimit: Int = 64 * 1024,
@@ -61,6 +66,8 @@ public final class LogTailer: @unchecked Sendable {
             startFileTailing()
         case .command:
             startCommandStreaming()
+        case .dockerLogs:
+            startContainerPolling()
         }
     }
 
@@ -193,7 +200,7 @@ public final class LogTailer: @unchecked Sendable {
             guard let newest else { return nil }
             return URL(fileURLWithPath: directory).appendingPathComponent(newest)
 
-        case .command:
+        case .command, .dockerLogs:
             return nil
         }
     }
@@ -250,5 +257,105 @@ public final class LogTailer: @unchecked Sendable {
         self.process = process
         self.processPipe = pipe
         onStateChange(.following)
+    }
+
+    // MARK: - 容器日志（轮询）
+
+    /// 轮询采集容器日志
+    ///
+    /// 首次用 `--tail` 取历史（容器启动时打印的 WebUI 地址就在历史里），
+    /// 之后用 `--since <上次时间戳>` 取增量。
+    /// 容器重启后 docker 会带上新的启动时间，日志流自动续上。
+    private func startContainerPolling() {
+        guard case .dockerLogs(let containerName) = spec.kind else { return }
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        // 容器轮询比文件轮询重（每次要起一个 docker 进程），间隔放宽
+        timer.schedule(deadline: .now(), repeating: max(pollInterval, 2))
+        timer.setEventHandler { [weak self] in
+            self?.pollContainer(containerName: containerName)
+        }
+        timer.resume()
+        self.timer = timer
+    }
+
+    private func pollContainer(containerName: String) {
+        let docker = ExecutableLocator.shared.which("docker")
+        guard let docker else {
+            onStateChange(.stopped)
+            return
+        }
+
+        var arguments = ["logs", "--timestamps"]
+        if let cursor = containerCursor {
+            arguments += ["--since", cursor]
+        } else if !containerHasHistory {
+            arguments += ["--tail", "500"]
+        }
+        arguments.append(containerName)
+
+        let output = runSync(docker, arguments: arguments)
+        guard output.exitCode == 0 else {
+            // 容器还没起来或已被删除：等待下次轮询
+            onStateChange(.waitingForFile)
+            return
+        }
+
+        let rawLines = output.stdout.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard !rawLines.isEmpty else {
+            onStateChange(.following)
+            return
+        }
+
+        var fresh: [String] = []
+        var newestTimestamp: String?
+
+        for raw in rawLines {
+            // docker --timestamps 的格式：<RFC3339> <日志内容>
+            guard let space = raw.firstIndex(of: " ") else { continue }
+            let timestamp = String(raw[raw.startIndex..<space])
+            let content = String(raw[raw.index(after: space)...])
+
+            let key = "\(timestamp)|\(content)"
+            if containerSeenKeys.contains(key) {
+                newestTimestamp = timestamp
+                continue
+            }
+
+            containerSeenKeys.append(key)
+            if containerSeenKeys.count > 500 {
+                containerSeenKeys.removeFirst(containerSeenKeys.count - 500)
+            }
+
+            newestTimestamp = timestamp
+            fresh.append(content)
+        }
+
+        if let newestTimestamp {
+            containerCursor = newestTimestamp
+        }
+        containerHasHistory = true
+        onStateChange(.following)
+
+        if !fresh.isEmpty {
+            onLines(fresh)
+        }
+    }
+
+    /// 同步执行一条命令（轮询内部使用，不能阻塞调用方太久）
+    private func runSync(_ executable: String, arguments: [String]) -> (exitCode: Int32, stdout: String) {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        guard (try? process.run()) != nil else {
+            return (-1, "")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 }

@@ -387,6 +387,16 @@ struct AddServiceWizard: View {
         }
     }
 
+    /// 按容器名或镜像推断 WebUI 地址的提取规则
+    ///
+    /// NapCat 会在日志里打印带 token 的 WebUI 地址；
+    /// 其余容器暂无已知格式，留 nil（不提取）。
+    private static func webUIKind(forContainer container: DockerContainer) -> WebUIKind? {
+        let haystack = (container.name + " " + container.image).lowercased()
+        if haystack.contains("napcat") { return .napCat }
+        return nil
+    }
+
     // MARK: - 提交
 
     private func advance() {
@@ -458,11 +468,11 @@ struct AddServiceWizard: View {
                 )),
                 probes: [],
                 logSources: [
-                    .command(
+                    .dockerLogs(
                         id: "container-logs",
                         label: "容器日志",
-                        executable: "docker",
-                        arguments: ["logs", "--tail", "500", "-f", container.name]
+                        containerName: container.name,
+                        webUIKind: Self.webUIKind(forContainer: container)
                     )
                 ],
                 openURL: nil

@@ -78,11 +78,11 @@ public enum LegacyMigration {
                 )),
                 probes: [],
                 logSources: [
-                    .command(
+                    .dockerLogs(
                         id: "\(legacyName)-logs",
                         label: "容器日志",
-                        executable: "docker",
-                        arguments: ["logs", "--tail", "500", "-f", containerName]
+                        containerName: containerName,
+                        webUIKind: legacyName == "napcat" ? .napCat : nil
                     )
                 ],
                 openURL: nil,

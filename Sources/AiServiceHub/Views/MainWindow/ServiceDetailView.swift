@@ -66,10 +66,29 @@ struct ServiceDetailView: View {
                 }
 
                 actionButtons
+
+                if snapshot.webURL == nil, descriptor.lifecycle == .managed {
+                    webUIPendingHint
+                }
             }
             .padding(20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// WebUI 地址尚未解析到时的提示
+    private var webUIPendingHint: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text(webUIUnavailableHint)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
     }
 
     /// 右栏：竖直日志面板
@@ -186,6 +205,29 @@ struct ServiceDetailView: View {
         return descriptor.note ?? descriptor.lifecycle.summary
     }
 
+    /// WebUI 按钮不可用时的说明
+    ///
+    /// 光把按钮禁掉等于让用户猜原因，要说清楚是「还没解析到」
+    /// 还是「这个服务的日志里本来就没有地址」。
+    private var webUIUnavailableHint: String {
+        let hasLogSource = !descriptor.logSources.isEmpty
+        guard hasLogSource else {
+            return "该服务没有配置日志来源，无法从日志中解析 WebUI 地址"
+        }
+        let hasExtractor = descriptor.logSources.contains { $0.webUIKind != nil }
+        guard hasExtractor else {
+            return "该服务的日志没有配置 WebUI 地址提取规则，无法自动解析"
+        }
+        switch snapshot.status {
+        case .running:
+            return "正在从日志中解析 WebUI 地址，请稍候或检查服务日志里是否打印了地址"
+        case .stopped:
+            return "服务未运行，启动后才会从日志中解析 WebUI 地址"
+        default:
+            return "尚未解析到 WebUI 地址"
+        }
+    }
+
     // MARK: - 元数据
 
     @ViewBuilder
@@ -288,7 +330,7 @@ struct ServiceDetailView: View {
             .buttonStyle(.glassProminent)
             .disabled(snapshot.webURL == nil)
             .controlSize(.large)
-            .help(snapshot.webURL?.absoluteString ?? "没有可用的 WebUI 地址")
+            .help(snapshot.webURL?.absoluteString ?? webUIUnavailableHint)
 
             Spacer()
         }

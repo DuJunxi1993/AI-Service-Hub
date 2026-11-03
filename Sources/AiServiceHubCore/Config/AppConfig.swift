@@ -130,6 +130,42 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.ownedProcesses = ownedProcesses
     }
 
+    /// 把旧配置升级到当前形态
+    ///
+    /// - 容器日志源从 `docker logs -f`（跟随模式）改成轮询模式：
+    ///   跟随模式不回放历史，会错过容器启动时打印的 WebUI 地址
+    /// - 补齐 `webUIKind`，否则 URL 提取根本不会被调用
+    public mutating func upgradeLogSources() {
+        for index in services.indices {
+            services[index].logSources = services[index].logSources.map { source in
+                var updated = source
+
+                // 旧式的容器日志命令 → 轮询式
+                if case .command(let executable, let arguments) = updated.kind,
+                   executable.hasSuffix("docker"),
+                   arguments.first == "logs",
+                   let containerName = arguments.last {
+                    updated.kind = .dockerLogs(containerName: containerName)
+                    if updated.webUIKind == nil, containerName.lowercased().contains("napcat") {
+                        updated.webUIKind = .napCat
+                    }
+                }
+
+                // NapCat 的日志源补上提取规则
+                if updated.webUIKind == nil {
+                    if case .dockerLogs(let containerName) = updated.kind,
+                       containerName.lowercased().contains("napcat") {
+                        updated.webUIKind = .napCat
+                    } else if updated.id == "astrbot-log" {
+                        updated.webUIKind = .astrbot
+                    }
+                }
+
+                return updated
+            }
+        }
+    }
+
     /// 按 id 查找服务
     public func service(id: UUID) -> ServiceDescriptor? {
         services.first { $0.id == id }

@@ -69,7 +69,7 @@ public enum AstrBotPreset {
                 .tcpPort(webPort)
             ],
             logSources: [
-                .file(id: "astrbot-log", label: "AstrBot 日志", path: logPath)
+                .file(id: "astrbot-log", label: "AstrBot 日志", path: logPath, webUIKind: .astrbot)
             ],
             openURL: URL(string: "http://localhost:\(webPort)"),
             note: "AI 机器人框架",

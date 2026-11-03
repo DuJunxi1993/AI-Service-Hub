@@ -66,7 +66,7 @@ final class AppSettings: ObservableObject {
         self.store = store
 
         let loaded = store.load()
-        let initial: AppConfig
+        var initial: AppConfig
 
         if let loaded {
             initial = loaded
@@ -82,6 +82,8 @@ final class AppSettings: ObservableObject {
             )
         }
 
+        // 升级旧配置（容器日志源、webUIKind 等）
+        initial.upgradeLogSources()
         config = initial
 
         let preferences = initial.preferences

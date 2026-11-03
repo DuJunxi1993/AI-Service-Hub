@@ -157,13 +157,20 @@ public actor LogHub {
         }
 
         // 提取 WebUI 地址
+        // 取批次里**最后**出现的那个：容器重启后 token 可能变化，
+        // 而日志行是按时间顺序的，越靠后越新。
         if let webUIKind {
+            var extracted: URL?
             for line in lines {
                 if let url = WebUIURLDetector.extract(from: line, for: webUIKind) {
-                    webURLs[key.serviceID] = url
-                    AppLog.info("解析到 WebUI 地址（\(key.sourceID)）：\(url.absoluteString)")
-                    break
+                    extracted = url
                 }
+            }
+            if let url = extracted {
+                if webURLs[key.serviceID] != url {
+                    AppLog.info("解析到 WebUI 地址（\(key.sourceID)）：\(url.absoluteString)")
+                }
+                webURLs[key.serviceID] = url
             }
         }
     }

@@ -61,6 +61,14 @@ public enum LogSourceKind: Sendable, Hashable {
     case filePattern(pattern: String)
     /// 跟随子进程的标准输出
     case command(executable: String, arguments: [String])
+    /// 轮询采集 Docker 容器日志
+    ///
+    /// 不用 `docker logs -f` 的原因：
+    /// - `-f` 只输出**新**日志，不回放历史 —— 容器启动时打印的 WebUI 地址会被错过
+    /// - `-f` 的进程在容器重启后退出，日志流就断了
+    ///
+    /// 改为按 `--since <时间戳>` 轮询：首次用 `--tail` 取历史，之后取增量。
+    case dockerLogs(containerName: String)
 }
 
 /// 一个日志来源
@@ -90,6 +98,10 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         LogSourceSpec(id: id, label: label, kind: .command(executable: executable, arguments: arguments), webUIKind: webUIKind)
     }
 
+    public static func dockerLogs(id: String, label: String, containerName: String, webUIKind: WebUIKind? = nil) -> LogSourceSpec {
+        LogSourceSpec(id: id, label: label, kind: .dockerLogs(containerName: containerName), webUIKind: webUIKind)
+    }
+
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
@@ -100,6 +112,7 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         case pattern
         case executable
         case arguments
+        case containerName
         case webUIKind
     }
 
@@ -107,6 +120,7 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         case file
         case filePattern
         case command
+        case dockerLogs
     }
 
     public init(from decoder: Decoder) throws {
@@ -123,6 +137,10 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
             kind = .command(
                 executable: try container.decode(String.self, forKey: .executable),
                 arguments: try container.decode([String].self, forKey: .arguments)
+            )
+        case .dockerLogs:
+            kind = .dockerLogs(
+                containerName: try container.decode(String.self, forKey: .containerName)
             )
         }
     }
@@ -143,6 +161,9 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
             try container.encode(Kind.command, forKey: .kind)
             try container.encode(executable, forKey: .executable)
             try container.encode(arguments, forKey: .arguments)
+        case .dockerLogs(let containerName):
+            try container.encode(Kind.dockerLogs, forKey: .kind)
+            try container.encode(containerName, forKey: .containerName)
         }
     }
 }

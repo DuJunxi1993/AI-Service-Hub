@@ -401,7 +401,18 @@ final class AppModel: ObservableObject {
             NSWorkspace.shared.open(url)
             return
         }
-        errorMessage = "\(descriptor.name) 没有可用的 Web UI 地址"
+        errorMessage = "\(descriptor.name)：还没有解析到 WebUI 地址。\n\(webUIReason(descriptor))"
+    }
+
+    /// 说明为什么没有 WebUI 地址
+    private func webUIReason(_ descriptor: ServiceDescriptor) -> String {
+        guard !descriptor.logSources.isEmpty else {
+            return "该服务没有配置日志来源，无法从日志中解析地址。"
+        }
+        guard descriptor.logSources.contains(where: { $0.webUIKind != nil }) else {
+            return "该服务的日志没有配置 WebUI 地址提取规则。"
+        }
+        return "正在从日志中解析，请确认服务已启动并在日志里打印了地址。"
     }
 
     /// 兜底的 WebUI 地址
