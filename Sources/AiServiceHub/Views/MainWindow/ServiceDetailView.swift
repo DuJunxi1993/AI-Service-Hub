@@ -1,13 +1,17 @@
 import SwiftUI
 import AiServiceHubCore
 
-/// 服务详情视图 - 玻璃头部 + 操作按钮 + 内联日志
+/// 服务详情视图 - 玻璃头部 + 左侧信息/按钮 + 右侧日志面板
+///
+/// 布局：
+/// - 常规：左栏放元数据、探测结果与操作按钮；右栏是**竖直**的日志面板（标题在上）
+/// - 展开：日志面板改为**横向**铺满整个下半部分
 struct ServiceDetailView: View {
     let descriptor: ServiceDescriptor
 
     @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
-    @State private var isLogFullscreen: Bool = false
+    @State private var isLogExpanded: Bool = false
 
     private var snapshot: ServiceSnapshot {
         appModel.snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
@@ -21,29 +25,22 @@ struct ServiceDetailView: View {
                 .opacity(0.2)
                 .padding(.vertical, 8)
 
-            if isLogFullscreen {
+            if isLogExpanded {
+                // 横向展开：日志铺满整个下半部分
                 InlineLogView(
                     descriptor: descriptor,
-                    isFullscreen: true,
-                    onEnterFullscreen: {},
-                    onExitFullscreen: { withAnimation(Theme.springAnimation) { isLogFullscreen = false } }
+                    isExpanded: true,
+                    onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = false } }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 0) {
-                    metadataSection
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 常规：左信息 / 右竖直日志
+                HSplitView {
+                    infoPane
+                        .frame(minWidth: 340, idealWidth: 460, maxWidth: .infinity)
 
-                    Divider()
-                        .opacity(0.2)
-
-                    InlineLogView(
-                        descriptor: descriptor,
-                        isFullscreen: false,
-                        onEnterFullscreen: { withAnimation(Theme.springAnimation) { isLogFullscreen = true } },
-                        onExitFullscreen: {}
-                    )
-                    .frame(maxHeight: .infinity)
+                    logPane
+                        .frame(minWidth: 300, idealWidth: 420, maxWidth: 720)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -55,6 +52,34 @@ struct ServiceDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    /// 左栏：元数据 + 探测结果 + 操作按钮
+    private var infoPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                metadataRows
+
+                if !snapshot.probeResults.isEmpty {
+                    Divider().opacity(0.3)
+                    probeSection
+                }
+
+                actionButtons
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 右栏：竖直日志面板
+    private var logPane: some View {
+        InlineLogView(
+            descriptor: descriptor,
+            isExpanded: false,
+            onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = true } }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 头部卡片
@@ -162,22 +187,6 @@ struct ServiceDetailView: View {
     }
 
     // MARK: - 元数据
-
-    private var metadataSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                metadataRows
-
-                if !snapshot.probeResults.isEmpty {
-                    Divider().opacity(0.3)
-                    probeSection
-                }
-
-                actionButtons
-            }
-            .padding(20)
-        }
-    }
 
     @ViewBuilder
     private var metadataRows: some View {
@@ -319,6 +328,11 @@ struct ProbeResultView: View {
                             Text(row.value)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(rowTint(row.state))
+                            if let note = row.note {
+                                Text(note)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                            }
                             Spacer()
                         }
                     }

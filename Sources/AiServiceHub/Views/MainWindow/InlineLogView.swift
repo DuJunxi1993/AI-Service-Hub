@@ -9,9 +9,10 @@ import AiServiceHubCore
 /// - 暂停是视图级的，不会影响其他视图
 struct InlineLogView: View {
     let descriptor: ServiceDescriptor
-    let isFullscreen: Bool
-    let onEnterFullscreen: () -> Void
-    let onExitFullscreen: () -> Void
+    /// 是否为横向展开形态（false = 右侧竖直面板）
+    let isExpanded: Bool
+    /// 在「竖直面板」与「横向铺满」之间切换
+    let onToggleExpanded: () -> Void
 
     @EnvironmentObject var appModel: AppModel
 
@@ -36,12 +37,13 @@ struct InlineLogView: View {
             content
         }
         .background(
-            RoundedRectangle(cornerRadius: isFullscreen ? 0 : 12, style: .continuous)
+            RoundedRectangle(cornerRadius: isExpanded ? 0 : 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: isFullscreen ? 0 : 12))
+                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: isExpanded ? 0 : 12))
         )
-        .padding(.horizontal, isFullscreen ? 0 : 16)
-        .padding(.bottom, isFullscreen ? 0 : 8)
+        .padding(.horizontal, isExpanded ? 0 : 12)
+        .padding(.bottom, isExpanded ? 0 : 8)
+        .padding(.top, isExpanded ? 6 : 8)
         .onAppear { subscribe() }
         .onDisappear { cancelSubscription() }
         .onChange(of: descriptor.id) { _, _ in
@@ -55,18 +57,20 @@ struct InlineLogView: View {
     // MARK: - 工具栏
 
     private var toolbar: some View {
-        HStack(spacing: 8) {
-            Text("实时日志")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("实时日志")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
 
-            if !searchText.isEmpty {
-                Text("(\(cachedLines.count) 条)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if !searchText.isEmpty {
+                    Text("(\(cachedLines.count) 条)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer()
 
             HStack(spacing: 4) {
                 // 搜索
@@ -77,7 +81,7 @@ struct InlineLogView: View {
                     TextField("搜索", text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 11))
-                        .frame(width: 100)
+                        .frame(width: isExpanded ? 120 : 70)
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
@@ -128,22 +132,19 @@ struct InlineLogView: View {
                 .controlSize(.small)
                 .help("清空此服务的日志（不影响其他服务）")
 
-                // 全屏
+                // 展开：竖直面板 <-> 横向铺满
                 Button {
-                    if isFullscreen {
-                        onExitFullscreen()
-                    } else {
-                        onEnterFullscreen()
-                    }
+                    onToggleExpanded()
                 } label: {
-                    Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    Image(systemName: isExpanded ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.glass)
                 .controlSize(.small)
+                .help(isExpanded ? "收回到右侧竖直面板" : "展开为横向面板")
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
@@ -159,7 +160,7 @@ struct InlineLogView: View {
                             .padding(.top, 40)
                     } else {
                         ForEach(cachedLines) { line in
-                            LogRowView(line: line)
+                            LogRowView(line: line, compact: !isExpanded)
                                 .id(line.id)
                         }
                     }
@@ -230,19 +231,27 @@ struct InlineLogView: View {
 /// 单行日志
 struct LogRowView: View {
     let line: LogLine
+    /// 窄栏模式：省略日期，只留时分秒
+    var compact: Bool = false
 
-    private static let timeFormatter: DateFormatter = {
+    private static let fullFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM-dd HH:mm:ss"
         return formatter
     }()
 
+    private static let shortFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(Self.timeFormatter.string(from: line.timestamp))
+            Text((compact ? Self.shortFormatter : Self.fullFormatter).string(from: line.timestamp))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
-                .frame(width: 110, alignment: .leading)
+                .frame(width: compact ? 58 : 110, alignment: .leading)
 
             Text(line.content)
                 .font(.system(size: 11, design: .monospaced))

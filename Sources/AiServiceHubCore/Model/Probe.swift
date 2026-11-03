@@ -108,11 +108,14 @@ public struct DetailRow: Sendable, Hashable, Identifiable {
     public let label: String
     public let value: String
     public let state: ProbeState?
+    /// 补充说明（例如「3 分钟前」），不影响状态着色
+    public let note: String?
 
-    public init(label: String, value: String, state: ProbeState? = nil) {
+    public init(label: String, value: String, state: ProbeState? = nil, note: String? = nil) {
         self.label = label
         self.value = value
         self.state = state
+        self.note = note
     }
 }
 

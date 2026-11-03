@@ -35,6 +35,9 @@ final class AppModel: ObservableObject {
     private var pollTimer: Timer?
     private var isRefreshing = false
 
+    /// 过渡态开始时间（用于判断启动/停止是否超时）
+    private var transitionStartedAt: [UUID: Date] = [:]
+
     init(settings: AppSettings = .shared) {
         self.settings = settings
         self.hub = LogHub()
@@ -78,11 +81,21 @@ final class AppModel: ObservableObject {
     // MARK: - 刷新
 
     /// 刷新全部服务状态
+    ///
+    /// 轮询用这个版本（并发时直接跳过，避免任务堆积）。
     func refreshAll() async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        await refreshAllNow()
+    }
 
+    /// 强制刷新全部服务状态
+    ///
+    /// 启停完成后必须调用：它不受轮询的 `isRefreshing` 守卫限制，
+    /// 否则启停刚结束时正好撞上轮询，这次刷新就被丢弃，
+    /// 状态会一直停在「启动中」直到下一轮轮询。
+    func refreshAllNow() async {
         await refreshContainers()
         // 每轮只枚举一次进程表，供所有探测复用
         let processTable = await ProcessInspector().snapshot()
@@ -95,11 +108,9 @@ final class AppModel: ObservableObject {
     func refresh(_ descriptor: ServiceDescriptor, processTable: ProcessTable? = nil) async {
         var snapshot = snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
 
-        // 过渡态（启动中 / 停止中）不被轮询覆盖
-        if snapshot.status.isTransitional {
-            snapshots[descriptor.id] = snapshot
-            return
-        }
+        // 先记下过渡态：下面的快照计算会覆盖 status
+        let pendingTransition = snapshot.status.isTransitional ? snapshot.status : nil
+        let transitionStart = transitionStartedAt[descriptor.id]
 
         var probeResults: [ProbeResult] = []
         for probe in descriptor.probes {
@@ -114,6 +125,38 @@ final class AppModel: ObservableObject {
             snapshot = await managedSnapshot(descriptor: descriptor, snapshot: snapshot)
         }
 
+        // 过渡态结算
+        if let pendingTransition, let transitionStart {
+            let elapsed = Date().timeIntervalSince(transitionStart)
+            switch pendingTransition {
+            case .starting:
+                if snapshot.status == .running {
+                    // 起来了 —— 结束过渡态
+                    transitionStartedAt[descriptor.id] = nil
+                } else if elapsed > Self.transitionGracePeriod {
+                    // 宽限期过了还没起来 —— 判定启动失败
+                    snapshot.status = .error
+                    snapshot.lastError = "启动超时（等待 \(Int(Self.transitionGracePeriod)) 秒后仍未运行）"
+                    transitionStartedAt[descriptor.id] = nil
+                } else {
+                    // 还在启动途中，保持「启动中」，不要被探测结果覆盖
+                    snapshot.status = .starting
+                }
+            case .stopping:
+                if snapshot.status == .stopped {
+                    transitionStartedAt[descriptor.id] = nil
+                } else if elapsed > Self.transitionGracePeriod {
+                    snapshot.status = .error
+                    snapshot.lastError = "停止超时（等待 \(Int(Self.transitionGracePeriod)) 秒后仍在运行）"
+                    transitionStartedAt[descriptor.id] = nil
+                } else {
+                    snapshot.status = .stopping
+                }
+            default:
+                transitionStartedAt[descriptor.id] = nil
+            }
+        }
+
         // WebUI 地址：日志里解析出来的优先
         if let url = await hub.webURL(for: descriptor.id) {
             snapshot.webURL = url
@@ -124,6 +167,9 @@ final class AppModel: ObservableObject {
         snapshot.updatedAt = Date()
         snapshots[descriptor.id] = snapshot
     }
+
+    /// 过渡态宽限期：容器启动可能要十几秒，进程启动通常几秒
+    private static let transitionGracePeriod: TimeInterval = 20
 
     /// 纯监控服务的状态
     private func observedSnapshot(
@@ -247,6 +293,7 @@ final class AppModel: ObservableObject {
         }
 
         setStatus(id, .starting)
+        transitionStartedAt[id] = Date()
         do {
             switch descriptor.managed {
             case .process(let spec):
@@ -260,7 +307,7 @@ final class AppModel: ObservableObject {
                 break
             }
 
-            await refreshAll()
+            await refreshAllNow()
             NotificationManager.shared.send(title: "服务启动", body: "\(descriptor.name) 已启动")
         } catch {
             fail(id, message: error.localizedDescription)
@@ -277,6 +324,7 @@ final class AppModel: ObservableObject {
         }
 
         setStatus(id, .stopping)
+        transitionStartedAt[id] = Date()
         do {
             switch descriptor.managed {
             case .process:
@@ -292,7 +340,7 @@ final class AppModel: ObservableObject {
                 break
             }
 
-            await refreshAll()
+            await refreshAllNow()
             NotificationManager.shared.send(title: "服务停止", body: "\(descriptor.name) 已停止")
         } catch {
             fail(id, message: error.localizedDescription)
@@ -409,6 +457,7 @@ final class AppModel: ObservableObject {
         snapshot.status = .error
         snapshot.lastError = message
         snapshots[id] = snapshot
+        transitionStartedAt[id] = nil
         errorMessage = message
     }
 

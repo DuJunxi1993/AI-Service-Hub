@@ -148,6 +148,8 @@ public struct ProbeEvaluator: Sendable {
                 let errorMessage = info["error_message"] as? String
                 let updatedAt = info["updated_at"] as? String
 
+                // 颜色只反映连接状态本身。「多久没更新」是另一回事，
+                // 混进颜色会让两个都 connected 的平台显示成不同颜色。
                 var rowState: ProbeState = switch platformState {
                 case "connected": .ok
                 case "disconnected", "error", "failed": .failed
@@ -156,16 +158,22 @@ public struct ProbeEvaluator: Sendable {
                 if info["needs_attention"] as? Bool == true {
                     rowState = .warning
                 }
-                // 状态长期没更新说明这条记录已经过时
-                if let updatedAt, Self.isStale(updatedAt) {
-                    rowState = .warning
-                }
 
                 var value = platformState
                 if let errorMessage, !errorMessage.isEmpty {
                     value += " · \(errorMessage)"
                 }
-                platformRows.append(DetailRow(label: name, value: value, state: rowState))
+
+                // 时间戳单独作为备注，不参与状态着色
+                var note: String?
+                if let updatedAt {
+                    note = Self.relativeTimeDescription(from: updatedAt)
+                    // 连接正常但很久没更新 —— 用备注提示，不改颜色
+                    if rowState == .ok, note?.hasPrefix("很久") == true {
+                        note = "\(note)（状态未更新）"
+                    }
+                }
+                platformRows.append(DetailRow(label: name, value: value, state: rowState, note: note))
             }
         }
 
@@ -201,14 +209,30 @@ public struct ProbeEvaluator: Sendable {
 
     /// 时间戳是否已经过时（超过 1 小时没更新）
     static func isStale(_ iso8601: String, threshold: TimeInterval = 3600) -> Bool {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: iso8601) else {
-            let fallback = ISO8601DateFormatter()
-            fallback.formatOptions = [.withInternetDateTime]
-            guard let date = fallback.date(from: iso8601) else { return false }
-            return Date().timeIntervalSince(date) > threshold
-        }
+        guard let date = parseTimestamp(iso8601) else { return false }
         return Date().timeIntervalSince(date) > threshold
+    }
+
+    /// 解析 ISO8601 时间戳（带或不带小数秒）
+    static func parseTimestamp(_ iso8601: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: iso8601) { return date }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: iso8601)
+    }
+
+    /// 相对时间描述，例如「3 分钟前」「2 小时前」「很久以前」
+    static func relativeTimeDescription(from iso8601: String) -> String? {
+        guard let date = parseTimestamp(iso8601) else { return nil }
+        let elapsed = Date().timeIntervalSince(date)
+        if elapsed < 0 { return "刚刚" }
+        if elapsed < 60 { return "刚刚" }
+        if elapsed < 3600 { return "\(Int(elapsed / 60)) 分钟前" }
+        if elapsed < 86400 { return "\(Int(elapsed / 3600)) 小时前" }
+        if elapsed < 86400 * 30 { return "\(Int(elapsed / 86400)) 天前" }
+        return "很久以前"
     }
 }
