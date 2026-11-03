@@ -56,6 +56,21 @@ other platforms; do not push macOS-only changes elsewhere.
 
 ## Non-obvious constraints
 
+- **macOS app icons do not adapt to appearance.** The bundle icon (Finder,
+  not-running Dock) is a single static `.icns`. Marking an appiconset with
+  `appearances: luminosity/dark` is a **no-op on macOS** — actool silently
+  drops the dark rendition and `Assets.car` keeps only "Any". (iOS 18 has
+  this; macOS does not.) The `iconutil` `_dark` suffix convention is ignored
+  by macOS too. The only appearance-aware app icon on macOS is the
+  **running** Dock tile: `NSApp.applicationIconImage`, settable at runtime.
+  So the bundle ships two `.icns` and `AppIconController` swaps
+  `applicationIconImage` on appearance change.
+- **The Dock icon follows the *system* appearance, not the in-app theme
+  picker.** The in-app theme (跟随系统/浅色/深色) forces the *window*
+  appearance, so `NSApp.effectiveAppearance` no longer reflects the system.
+  Read the system state from the global `AppleInterfaceStyle` domain key
+  instead (`SystemAppearance.isDark`). Note that any `UserDefaults` read
+  falls back to the global domain — a custom suite cannot isolate it.
 - **Never use `pgrep` to find processes.** On macOS 27 it misses processes
   spawned by GUI apps (verified: `pgrep -f "dsh web"` returns nothing while
   `ps -A` shows it). Use `ProcessInspector.snapshot()` and match in memory.

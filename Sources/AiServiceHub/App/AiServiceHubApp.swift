@@ -131,8 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 请求通知权限
         NotificationManager.shared.requestAuthorization()
 
-        // Dock 图标跟随明暗主题（macOS 只有运行中的图标能变）
-        AppIconController.shared.start(settings: AppSettings.shared)
+        // Dock 图标跟随系统明暗（macOS 只有运行中的图标能变）
+        AppIconController.shared.start()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

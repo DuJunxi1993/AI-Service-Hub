@@ -3,7 +3,7 @@ import SwiftUI
 import Combine
 import AiServiceHubCore
 
-/// Dock 图标控制器 —— 让**运行中**的 Dock 图标跟随明暗主题
+/// Dock 图标控制器 —— 让**运行中**的 Dock 图标跟随系统明暗
 ///
 /// ## 为什么需要它
 ///
@@ -18,14 +18,21 @@ import AiServiceHubCore
 ///
 /// 所以做法是：
 /// - bundle 里放两套 `.icns`（浅色 / 深色）
-/// - bundle 图标用浅色那套（Finder / 未运行时显示）
-/// - 运行中按有效外观切换 `applicationIconImage`
+/// - bundle 图标用浅色那套（Finder / 未运行时显示，macOS 在暗色下会自行做暗化）
+/// - 运行中按**系统外观**切换 `applicationIconImage`
+///
+/// ## 注意：跟随的是系统，不是应用内主题
+///
+/// 应用内的主题设置（跟随系统 / 浅色 / 深色）只影响界面配色。
+/// 图标跟随**系统**外观 —— 白天浅色、夜间深色。
+/// 否则应用内选了「浅色」时，夜间 Dock 里仍是浅色图标，与环境不一致。
 @MainActor
 final class AppIconController {
     static let shared = AppIconController()
 
     private var appearanceObservation: NSKeyValueObservation?
-    private var cancellables = Set<AnyCancellable>()
+    private var pollTimer: Timer?
+    private var lastSystemIsDark = false
 
     private lazy var lightIcon = Self.loadIcon(named: "ai_service_hub")
     private lazy var darkIcon = Self.loadIcon(named: "ai_service_hub_dark")
@@ -33,26 +40,34 @@ final class AppIconController {
     private init() {}
 
     /// 启动图标跟随
-    func start(settings: AppSettings) {
-        // 有效外观变化：系统切换明暗，或 app 自身设置改变了 appearance
+    func start() {
+        // 系统切换明暗时 KVO 会触发 —— 立即换图标
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.apply() }
         }
 
-        // 主题设置变化（跟随系统 / 浅色 / 深色）
-        settings.$themeMode
-            .dropFirst()
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.apply() }
-            }
-            .store(in: &cancellables)
+        // 兜底轮询：应用若强制了窗口外观，KVO 不一定反映系统变化
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pollSystemAppearance() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
 
+        lastSystemIsDark = SystemAppearance.isDark()
         apply()
     }
 
-    /// 按当前外观应用图标
+    /// 检查系统外观是否变化
+    private func pollSystemAppearance() {
+        let isDark = SystemAppearance.isDark()
+        guard isDark != lastSystemIsDark else { return }
+        lastSystemIsDark = isDark
+        apply()
+    }
+
+    /// 应用图标
     private func apply() {
-        let useDark = shouldUseDarkIcon()
+        let useDark = SystemAppearance.isDark()
         let icon = useDark ? darkIcon : lightIcon
         guard let icon else {
             NSApp.applicationIconImage = nil  // 回落到 bundle 图标
@@ -61,22 +76,7 @@ final class AppIconController {
         if NSApp.applicationIconImage != icon {
             NSApp.applicationIconImage = icon
         }
-        AppLog.info("Dock 图标：\(useDark ? "深色" : "浅色")（主题=\(AppSettings.shared.themeMode.rawValue)）")
-    }
-
-    /// 该用深色图标吗
-    ///
-    /// 优先看 app 的主题设置（跟随系统 / 浅色 / 深色）——
-    /// 它比系统外观更贴合用户在设置里选的模式。
-    private func shouldUseDarkIcon() -> Bool {
-        switch AppSettings.shared.themeMode {
-        case .light:
-            return false
-        case .dark:
-            return true
-        case .system:
-            return NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        }
+        AppLog.info("Dock 图标：\(useDark ? "深色" : "浅色")（跟随系统外观）")
     }
 
     /// 从 bundle 读取 .icns
