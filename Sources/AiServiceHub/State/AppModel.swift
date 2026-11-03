@@ -164,6 +164,12 @@ final class AppModel: ObservableObject {
             snapshot.webURL = await fallbackWebURL(for: descriptor)
         }
 
+        // 状态变化时记一条日志，便于排查「指示灯停在某个状态」这类问题
+        let previousStatus = snapshots[descriptor.id]?.status
+        if previousStatus != snapshot.status {
+            AppLog.info("状态更新 \(descriptor.name)：\(previousStatus?.displayName ?? "—") → \(snapshot.status.displayName)")
+        }
+
         snapshot.updatedAt = Date()
         snapshots[descriptor.id] = snapshot
     }
