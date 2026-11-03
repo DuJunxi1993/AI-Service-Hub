@@ -44,6 +44,7 @@ public final class LogTailer: @unchecked Sendable {
     private var containerCursor: String?          // 上次取到的最后一条时间戳
     private var containerSeenKeys: [String] = []  // 已输出行的指纹，用来去重
     private var containerHasHistory = false
+    private var containerFailureCount = 0         // 连续失败次数（用于退避）
 
     public init(
         spec: LogSourceSpec,
@@ -273,7 +274,15 @@ public final class LogTailer: @unchecked Sendable {
         // 容器轮询比文件轮询重（每次要起一个 docker 进程），间隔放宽
         timer.schedule(deadline: .now(), repeating: max(pollInterval, 2))
         timer.setEventHandler { [weak self] in
-            self?.pollContainer(containerName: containerName)
+            guard let self else { return }
+            self.pollContainer(containerName: containerName)
+            // 连续失败（容器不存在 / Docker 没起）时退避，最多 30 秒一次，
+            // 免得对着一个不存在的容器反复起 docker 进程
+            let failures = self.containerFailureCount
+            if failures > 0 {
+                let backoff = min(30.0, Double(failures) * 5.0)
+                timer.schedule(deadline: .now() + backoff, repeating: backoff)
+            }
         }
         timer.resume()
         self.timer = timer
@@ -298,8 +307,10 @@ public final class LogTailer: @unchecked Sendable {
         guard output.exitCode == 0 else {
             // 容器还没起来或已被删除：等待下次轮询
             onStateChange(.waitingForFile)
+            containerFailureCount += 1
             return
         }
+        containerFailureCount = 0
 
         let rawLines = output.stdout.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         guard !rawLines.isEmpty else {
@@ -338,6 +349,7 @@ public final class LogTailer: @unchecked Sendable {
         onStateChange(.following)
 
         if !fresh.isEmpty {
+            AppLog.debug("容器日志 \(containerName)：新增 \(fresh.count) 行")
             onLines(fresh)
         }
     }
