@@ -6,7 +6,7 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 ## 📥 Latest Release
 
-### v1.0.3 — 2026-06-18
+### v2.0.0 — 2026-11-03 · 🏷️ 更名 + 架构重构
 
 **最低系统**: macOS 26 Tahoe (Apple Silicon) · **架构**: arm64
 
@@ -14,19 +14,24 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
-| `AiServiceHub-1.0.3.dmg` | 557 KB | `3f32ca806f37abf97fb36672db200fd61ce5c3d8ae2f7ac6708eb948284440f6` |
-| `AiServiceHub-1.0.3-macOS.zip` | 549 KB | `5b7278d5f4b90cc3ef0e31569d7f515423ccb78686030ac5cfc54ffca644b805` |
+| `AiServiceHub-2.0.0.dmg` | 构建后由 CI 生成 | 见 `release-checksums.txt` |
+| `AiServiceHub-2.0.0-macOS.zip` | 构建后由 CI 生成 | 见 `release-checksums.txt` |
 
-本次变更：见下方 [Changelog → v1.0.3](#v103--2026-06-18)。
+> v2.0.0 为架构性变更，**不兼容旧版配置格式**（会自动迁移）。
+> 变更详情见下方 [Changelog → v2.0.0](#v200--2026-11-03--更名--架构重构)。
 
 ---
 
 ## ✨ 主要功能
 
-- **一键管理** 三个核心服务：AstrBot（QQ 机器人）、NapCat（QQ 协议端）、Shipyard（Agent 调度平台）
-- **实时日志** 监听（文件 / docker logs 双模式，行缓冲 + 批量 flush）
-- **智能 URL 检测** 从日志自动提取 WebUI URL（含 token）
-- **daemon 化** AstrBot — 关闭 app 不影响 AstrBot 运行
+- **两种生命周期模式** — 纯监控（只读）/ 可管理（本程序负责启停）
+- **三种驱动方式** — 持有子进程、委托 Docker 容器、只读探测
+- **内置预设** — AstrBot（可管理）、Hermes Agent 与 DeepSeek Harness（纯监控）
+- **任意服务** — Docker 容器从列表选取；自定义进程服务可配置可执行文件、参数、工作目录、daemon 化与退出行为
+- **常驻日志中心** — 每个服务独立采集，切换服务不中断、不重复；支持搜索 / 暂停 / 复制 / 清空 / 全屏
+- **WebUI 地址发现** — 从日志提取带 token 的地址，不依赖当前选中哪个服务
+- **探测结果面板** — 进程、监听端口、HTTP 可达性、Gateway 平台状态
+- **启动时自动拉起** — 总开关 + 逐项勾选，只对可管理服务生效
 - **菜单栏常驻** — app 关闭后菜单栏图标仍可访问
 - **Liquid Glass** UI — SwiftUI 原生 Liquid Glass 设计
 
@@ -72,6 +77,72 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 ---
 
 ## 📜 Changelog
+
+### v2.0.0 — 2026-11-03 · 更名 + 架构重构
+
+**更名**
+
+项目不再只服务于 AstrBot，改为通用多服务控制台，因此更名 **AI Service Hub**。
+
+- 可执行文件 / SPM 模块：`AstrbotLauncher` → `AiServiceHub`
+- Bundle ID：`com.djx.astrbotlauncher` → `com.djx.aiservicehub`
+- 显示名：`AstrBot Launcher` → `AI Service Hub`
+
+**两种生命周期模式**
+
+顶层只区分「本程序要不要负责它的生命周期」：
+
+- `observed` 纯监控 — 只读取状态、日志、端口，不启动、不停止、不持有任何进程
+- `managed` 可管理 — 再按驱动方式细分：
+  - `process` 持有子进程 — 本程序 spawn 并持有 PID
+  - `container` 委托容器 — 只发 `docker start/stop`，进程由 dockerd 托管
+
+持有子进程时提供两个独立开关：`detached`（daemon 化）与 `stopOnAppQuit`（退出时终止）。
+
+**新增监控板块**
+
+- **Hermes Agent**（纯监控）：读取 `~/.hermes/gateway_state.json`，显示 Gateway 运行状态、活跃 Agent 数、版本、各消息平台连接状态与最后更新时间；端口是动态分配的，按 pid 反查；可实时查看 gateway / agent 日志。
+- **DeepSeek Harness**（纯监控）：显示 `dsh web` 进程与 `--port`、DSHShell 进程、HTTP 可达性（DSH 全部路径需鉴权，401 视为可达）、最近启动日志与会话数量。
+
+**任意服务**
+
+- Docker 服务不再写死。NapCat / Shipyard 不再是预设，从容器列表直接选取。
+- 自定义进程服务：可配置可执行文件、参数、工作目录、是否经 shell、存活检测、日志来源、daemon 化与退出行为。
+
+**启动时自动拉起**
+
+- 总开关 + 每个服务独立勾选，只对可管理服务生效。
+- 单个服务启动失败不阻断其余服务。
+
+**架构重构**
+
+- 抽出 `AiServiceHubCore`（纯 Foundation，编译期禁止 import SwiftUI），配 57 个单元测试。
+- `AppState`（上帝对象）拆分为 `AppModel`（编排）+ Core 内的驱动与探测器。
+- `ServiceDescriptor` 描述符 + 两档生命周期取代写死的三枚举。
+- 配置从 UserDefaults 平铺 key 改为版本化 JSON，写入保留 `.bak`，损坏自动回退。
+- `LogHub` 取代 `LogWatcher`：tailer 常驻，与视图生命周期解耦。
+- 进程身份改用 `pid + 启动时间` 双条件，避免 PID 复用误杀；新增所有权账本用于回收孤儿进程。
+- 命令执行改为并发读取 stdout/stderr + 超时 + 取消。
+- 探测统一走 `ps -A` 枚举（macOS 27 的 `pgrep -f` 会漏掉由 GUI app 派生的进程）。
+
+**迁移**
+
+新版首次启动会显式读取旧域 `com.djx.astrbotlauncher`：
+
+- AstrBot 的启动模式 / 路径 / 端口 → 「可管理 · 持有子进程」
+- NapCat / Shipyard 的容器名 → 「可管理 · 委托容器」
+- 主题、轮询间隔、自启、侧边栏顺序 → 偏好设置
+
+旧配置保留在磁盘上但不再读取。建议删除 `/Applications` 里的旧 app，
+并在新版设置中重新开启「开机自动启动」。
+
+**构建**
+
+- 新增 `scripts/xcode-env.sh` 自动定位可用 Xcode（CommandLineTools 缺少 SwiftUI 宏插件，无法编译本项目）。
+- `build.sh` 只使用仓库内图标，不再依赖 `~/Downloads` 与 `~/Pictures`。
+- CI 改为真实可跑的 `macos-26` workflow：跑测试、打包 zip + dmg、tag 时创建 Release。
+
+---
 
 ### v1.0.3 — 2026-06-18
 

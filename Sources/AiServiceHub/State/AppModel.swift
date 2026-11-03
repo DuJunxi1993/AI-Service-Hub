@@ -234,6 +234,13 @@ final class AppModel: ObservableObject {
             return
         }
 
+        // 已经在运行就不要重复拉起：否则会 spawn 出第二个实例（典型表现是
+        // 端口被占用后新进程立刻退出，而状态看起来「启动成功」）
+        if snapshots[id]?.status == .running {
+            AppLog.info("\(descriptor.name) 已在运行，跳过启动")
+            return
+        }
+
         setStatus(id, .starting)
         do {
             switch descriptor.managed {

@@ -8,24 +8,14 @@ on:
     branches: [macos]
   workflow_dispatch:
 
-# NOTE: As of mid-2026, GitHub's macos-15 runner ships with the macOS 15 SDK,
-# which does NOT contain the SwiftUI `glassEffect` / `glassProminent` APIs
-# (introduced in the macOS 26 SDK). The macOS app relies on these APIs and
-# therefore cannot be built on the available CI runners.
-#
-# This workflow is kept as a placeholder so that when GitHub ships a
-# macos-26 runner, we can simply bump `runs-on` below and CI will start working.
-#
-# Until then, the build step is marked `continue-on-error` so CI status remains
-# informational and does not block merges.
-
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: macos-15
-    continue-on-error: true
+    # macos-26 runner 已 GA，镜像内含 macOS 26 SDK，可编译 glassEffect /
+    # glassProminent 等 macOS 26 API；且为 arm64，与本项目产物一致。
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,41 +24,59 @@ jobs:
         run: |
           sw_vers
           xcode-select -p
-          xcodebuild -version
+          swift --version
 
-      - name: Install Swift toolchain
-        uses: swift-actions/setup-swift@v3
-        with:
-          swift-version: '6.2'
+      - name: Run unit tests
+        run: swift test
 
-      - name: Build
+      - name: Build app bundle
         run: bash build.sh
 
       - name: Verify bundle
         run: |
           test -d AiServiceHub.app
           test -x AiServiceHub.app/Contents/MacOS/AiServiceHub
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" AiServiceHub.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" AiServiceHub.app/Contents/Info.plist
           du -sh AiServiceHub.app
 
-      - name: Zip app bundle
-        if: success()
+      - name: Read version
+        id: version
         run: |
-          cd AiServiceHub.app
-          zip -r ../AiServiceHub-macOS.zip .
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "版本：$VERSION"
+
+      - name: Package (zip + dmg)
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          ditto -c -k --keepParent AiServiceHub.app "AiServiceHub-${VERSION}-macOS.zip"
+          hdiutil create \
+            -volname "AI Service Hub" \
+            -srcfolder AiServiceHub.app \
+            -ov -format UDZO \
+            "AiServiceHub-${VERSION}.dmg"
+          shasum -a 256 "AiServiceHub-${VERSION}-macOS.zip" "AiServiceHub-${VERSION}.dmg" | tee release-checksums.txt
 
       - name: Upload artifact
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AiServiceHub-macOS
-          path: AiServiceHub-macOS.zip
+          path: |
+            AiServiceHub-${{ steps.version.outputs.value }}-macOS.zip
+            AiServiceHub-${{ steps.version.outputs.value }}.dmg
+            release-checksums.txt
           if-no-files-found: error
 
       - name: Create Release
-        if: success() && startsWith(github.ref, 'refs/tags/macos-v')
+        if: startsWith(github.ref, 'refs/tags/macos-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AiServiceHub-macOS.zip
+          files: |
+            AiServiceHub-${{ steps.version.outputs.value }}-macOS.zip
+            AiServiceHub-${{ steps.version.outputs.value }}.dmg
+            release-checksums.txt
           draft: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
