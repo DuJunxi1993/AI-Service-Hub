@@ -60,7 +60,10 @@ public struct ProcessDriver: Sendable {
 
         var elapsed: TimeInterval = 0
         while elapsed < 5 {
-            if !ProcessInspector.isAlive(pid: record.pid) { return }
+            if !ProcessInspector.isAlive(pid: record.pid) {
+                ProcessInspector.reap(pid: record.pid)
+                return
+            }
             try? await Task.sleep(nanoseconds: 100_000_000)
             elapsed += 0.1
         }
@@ -74,6 +77,7 @@ public struct ProcessDriver: Sendable {
                 elapsed += 0.1
             }
         }
+        ProcessInspector.reap(pid: record.pid)
     }
 
     /// 探测进程状态

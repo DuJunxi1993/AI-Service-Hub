@@ -274,6 +274,17 @@ final class AppSettings: ObservableObject {
         store.save(config)
     }
 
+    /// 回收上次非正常退出留下的孤儿进程，并写回账本
+    /// - Returns: 被终止的 pid
+    @discardableResult
+    func reclaimOrphanProcesses(using ledger: OwnershipLedger) async -> [Int32] {
+        var records = config.ownedProcesses
+        let terminated = await ledger.reclaimOrphans(in: &records)
+        config.ownedProcesses = records
+        store.save(config)
+        return terminated
+    }
+
     /// 恢复出厂设置
     func resetToDefaults() {
         store.reset()

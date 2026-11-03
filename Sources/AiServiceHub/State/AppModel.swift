@@ -50,6 +50,11 @@ final class AppModel: ObservableObject {
             Task { await hub.attach(descriptor: descriptor) }
         }
         Task {
+            // 上次若是被强杀/崩溃，先回收本应随 app 结束的孤儿进程
+            let reclaimed = await settings.reclaimOrphanProcesses(using: ledger)
+            if !reclaimed.isEmpty {
+                AppLog.info("已回收 \(reclaimed.count) 个孤儿进程")
+            }
             await refreshAll()
             await autoStartEnabledServices()
         }

@@ -41,13 +41,15 @@ public struct OwnershipLedger: Sendable {
     /// - `detached == false`：进程本应随 launcher 一起结束，若还活着说明上次是非正常退出，终止它。
     /// - `detached == true`：daemon 化语义，进程本就该继续存活，只把它从账本里摘掉。
     ///
+    /// 无论哪种情况，账本在回收后都会清空：本次会话还没启动过任何东西。
+    ///
     /// - Returns: 被终止的 pid 列表
     @discardableResult
-    public func reclaimOrphans(in config: inout AppConfig) async -> [Int32] {
+    public func reclaimOrphans(in records: inout [OwnedProcessRecord]) async -> [Int32] {
         var terminated: [Int32] = []
         var remaining: [OwnedProcessRecord] = []
 
-        for record in config.ownedProcesses {
+        for record in records {
             let alive = ProcessInspector.matchesIdentity(
                 pid: record.pid,
                 startTimeToken: record.startTimeToken
@@ -67,7 +69,7 @@ public struct OwnershipLedger: Sendable {
             terminated.append(record.pid)
         }
 
-        config.ownedProcesses = remaining
+        records = remaining
         return terminated
     }
 }

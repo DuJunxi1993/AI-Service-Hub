@@ -80,9 +80,33 @@ public struct ProcessInspector: Sendable {
     // MARK: - 进程存活
 
     /// 进程是否存活
+    ///
+    /// **僵尸进程不算存活**：子进程退出后在被父进程回收（waitpid）之前仍是僵尸，
+    /// 此时 `kill(pid, 0)` 依然返回 0，只看它会把「已经死了」误判成「还活着」，
+    /// 导致停止操作白白等满 SIGTERM 超时。
     public static func isAlive(pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
-        return kill(pid, 0) == 0 || errno == EPERM
+        if kill(pid, 0) != 0 && errno != EPERM {
+            return false
+        }
+        return !isZombie(pid: pid)
+    }
+
+    /// 进程是否处于僵尸态
+    public static func isZombie(pid: pid_t) -> Bool {
+        var info = kinfo_proc()
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else {
+            return false
+        }
+        return Int32(info.kp_proc.p_stat) == SZOMB
+    }
+
+    /// 回收已经退出的子进程，避免留下僵尸
+    public static func reap(pid: pid_t) {
+        var status: Int32 = 0
+        _ = waitpid(pid, &status, WNOHANG)
     }
 
     /// 进程的启动时间标识
