@@ -33,10 +33,9 @@ public enum CommandError: Error, LocalizedError, Equatable {
 /// 异步命令执行器
 ///
 /// 与旧实现的关键差异：
-/// - **stdout / stderr 并发读取**：旧实现先 `readDataToEndOfFile()` 读 stdout 再读 stderr，
+/// - **stdout / stderr 并发读取**：旧实现先读完 stdout 再读 stderr，
 ///   子进程若先把 stderr 写满管道就会死锁。
 /// - **支持超时与取消**。
-/// - **全程在主线程之外**：调用方负责不要在主 actor 上 await 长时间命令。
 public struct CommandRunner: Sendable {
     public init() {}
 
@@ -61,13 +60,17 @@ public struct CommandRunner: Sendable {
             environment: environment,
             workingDirectory: workingDirectory
         )
-        return try await withTaskCancellationHandler {
+        // box 的生命周期必须覆盖整个 await：回调里用强引用建立临时循环，
+        // 完成时由 box.teardown() 拆掉。这里再兜一层，确保 await 期间不被释放。
+        let result = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 box.start(timeout: timeout, continuation: continuation)
             }
         } onCancel: {
             box.cancel()
         }
+        withExtendedLifetime(box) {}
+        return result
     }
 
     /// 执行命令，忽略退出码（失败时返回空输出）
@@ -83,8 +86,11 @@ public struct CommandRunner: Sendable {
 
 /// 单次执行的内部状态容器
 ///
-/// Foundation 的 Process / Pipe 不满足 Sendable，这里以 `@unchecked Sendable`
-/// 封装，并用一把锁保护所有共享状态。
+/// Foundation 的 Process / Pipe / FileHandle 不满足 Sendable，这里以
+/// `@unchecked Sendable` 封装，并用一把锁保护所有共享状态。
+///
+/// 完成信号以 **进程退出** 为准：进程结束后关闭父进程侧的写入端、把管道里
+/// 剩余数据读干净，然后恢复 continuation。不依赖 EOF 事件是否送达。
 private final class CommandBox: @unchecked Sendable {
     private enum Stream {
         case stdout
@@ -103,11 +109,7 @@ private final class CommandBox: @unchecked Sendable {
     private let lock = NSLock()
     private var stdoutData = Data()
     private var stderrData = Data()
-    private var stdoutFinished = false
-    private var stderrFinished = false
-    private var processExited = false
     private var didResume = false
-    private var didTimeout = false
     private var continuation: CheckedContinuation<CommandResult, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var timeoutSeconds: Double = 30
@@ -124,10 +126,13 @@ private final class CommandBox: @unchecked Sendable {
         self.workingDirectory = workingDirectory
     }
 
+    // MARK: - 启动
+
     func start(timeout: Duration, continuation: CheckedContinuation<CommandResult, Error>) {
         lock.lock()
         self.continuation = continuation
         lock.unlock()
+
         timeoutSeconds = Double(timeout.components.seconds)
             + Double(timeout.components.attoseconds) / 1e18
 
@@ -145,27 +150,20 @@ private final class CommandBox: @unchecked Sendable {
             process.environment = env
         }
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // 强引用捕获：保证 box 在 process / pipe 存活期间一直活着
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                self?.markStreamFinished(.stdout)
-            } else {
-                self?.append(data, to: .stdout)
-            }
+            guard !data.isEmpty else { return }
+            self.append(data, to: .stdout)
         }
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                self?.markStreamFinished(.stderr)
-            } else {
-                self?.append(data, to: .stderr)
-            }
+            guard !data.isEmpty else { return }
+            self.append(data, to: .stderr)
         }
 
-        process.terminationHandler = { [weak self] _ in
-            self?.markProcessExited()
+        process.terminationHandler = { [self] _ in
+            self.drainAndFinish()
         }
 
         do {
@@ -175,19 +173,20 @@ private final class CommandBox: @unchecked Sendable {
             return
         }
 
-        timeoutTask = Task { [weak self] in
+        timeoutTask = Task { [self] in
             try? await Task.sleep(for: timeout)
             guard !Task.isCancelled else { return }
-            self?.handleTimeout()
+            self.handleTimeout()
         }
     }
 
     func cancel() {
-        guard process.isRunning else { return }
-        process.terminate()
+        if process.isRunning {
+            process.terminate()
+        }
     }
 
-    // MARK: - 状态更新
+    // MARK: - 数据累积
 
     private func append(_ data: Data, to stream: Stream) {
         lock.lock()
@@ -198,23 +197,27 @@ private final class CommandBox: @unchecked Sendable {
         lock.unlock()
     }
 
-    private func markStreamFinished(_ stream: Stream) {
-        lock.lock()
-        switch stream {
-        case .stdout: stdoutFinished = true
-        case .stderr: stderrFinished = true
-        }
-        let ready = stdoutFinished && stderrFinished && processExited
-        lock.unlock()
-        if ready { finish() }
-    }
+    // MARK: - 完成
 
-    private func markProcessExited() {
-        lock.lock()
-        processExited = true
-        let ready = stdoutFinished && stderrFinished
-        lock.unlock()
-        if ready { finish() }
+    /// 进程已退出：关闭父进程侧写端 → 读净管道 → 完成
+    private func drainAndFinish() {
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        // 关闭父进程持有的写端，确保读端一定看到 EOF
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+
+        if let remaining = try? stdoutPipe.fileHandleForReading.readDataToEndOfFile(),
+           !remaining.isEmpty {
+            append(remaining, to: .stdout)
+        }
+        if let remaining = try? stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+           !remaining.isEmpty {
+            append(remaining, to: .stderr)
+        }
+
+        finish()
     }
 
     private func handleTimeout() {
@@ -230,6 +233,8 @@ private final class CommandBox: @unchecked Sendable {
     }
 
     private func finish() {
+        let exitCode = process.terminationStatus
+
         lock.lock()
         guard !didResume else {
             lock.unlock()
@@ -238,46 +243,42 @@ private final class CommandBox: @unchecked Sendable {
         didResume = true
         let out = stdoutData
         let err = stderrData
-        lock.unlock()
-
-        timeoutTask?.cancel()
-        timeoutTask = nil
-
-        let result = CommandResult(
-            exitCode: process.terminationStatus,
-            stdout: String(data: out, encoding: .utf8) ?? "",
-            stderr: String(data: err, encoding: .utf8) ?? ""
-        )
-        resume(returning: result)
-    }
-
-    private func resume(returning result: CommandResult) {
-        lock.lock()
-        guard !didResume, let continuation else {
-            lock.unlock()
-            return
-        }
-        didResume = true
+        let continuation = self.continuation
         self.continuation = nil
         lock.unlock()
 
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        continuation.resume(returning: result)
+        teardown()
+
+        let result = CommandResult(
+            exitCode: exitCode,
+            stdout: String(data: out, encoding: .utf8) ?? "",
+            stderr: String(data: err, encoding: .utf8) ?? ""
+        )
+        continuation?.resume(returning: result)
     }
 
     private func resume(throwing error: Error) {
         lock.lock()
-        guard !didResume, let continuation else {
+        guard !didResume else {
             lock.unlock()
             return
         }
         didResume = true
+        let continuation = self.continuation
         self.continuation = nil
         lock.unlock()
 
+        teardown()
+        continuation?.resume(throwing: error)
+    }
+
+    /// 拆掉所有强引用，避免 box 常驻内存
+    private func teardown() {
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        process.terminationHandler = nil
+
         timeoutTask?.cancel()
         timeoutTask = nil
-        continuation.resume(throwing: error)
     }
 }
