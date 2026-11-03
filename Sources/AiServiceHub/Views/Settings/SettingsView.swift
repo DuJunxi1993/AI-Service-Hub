@@ -1,17 +1,21 @@
 import SwiftUI
 import AppKit
+import AiServiceHubCore
 
 /// 设置面板 - 以 sheet 形式从主窗口弹出
 ///
 /// 布局原则：
-/// - 标签在输入框上方（更现代的移动端风格）
+/// - 标签在输入框上方
 /// - 每节顶部有图标 + 标题 + 简介
-/// - 关键操作有"快速操作"按钮
 /// - 状态信息直接显示在相关设置旁
 struct SettingsSheet: View {
     @EnvironmentObject var settings: AppSettings
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var appModel: AppModel
     @Environment(\.dismiss) var dismiss
+
+    @State private var showAddWizard = false
+    @State private var editingService: ServiceDescriptor?
+    @State private var showRemoveConfirm: ServiceDescriptor?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,8 +23,35 @@ struct SettingsSheet: View {
             Divider().opacity(0.2)
             content
         }
-        .frame(width: 580, height: 700)
+        .frame(width: 620, height: 720)
         .background(Color(NSColor.windowBackgroundColor))
+        .sheet(isPresented: $showAddWizard) {
+            AddServiceWizard()
+                .environmentObject(settings)
+                .environmentObject(appModel)
+        }
+        .sheet(item: $editingService) { descriptor in
+            EditServiceSheet(descriptor: descriptor)
+                .environmentObject(settings)
+                .environmentObject(appModel)
+        }
+        .alert("移除服务", isPresented: Binding(
+            get: { showRemoveConfirm != nil },
+            set: { if !$0 { showRemoveConfirm = nil } }
+        ), presenting: showRemoveConfirm) { descriptor in
+            Button("移除", role: .destructive) {
+                Task {
+                    await appModel.hub.removeService(serviceID: descriptor.id)
+                    settings.remove(id: descriptor.id)
+                    showRemoveConfirm = nil
+                }
+            }
+            Button("取消", role: .cancel) {
+                showRemoveConfirm = nil
+            }
+        } message: { descriptor in
+            Text("将从列表中移除「\(descriptor.name)」。不会影响它本身的运行。")
+        }
     }
 
     private var header: some View {
@@ -31,7 +62,7 @@ struct SettingsSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("设置")
                     .font(.title3.weight(.semibold))
-                Text("AstrBot Launcher 配置")
+                Text("AI Service Hub 配置")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -54,16 +85,44 @@ struct SettingsSheet: View {
     private var content: some View {
         ScrollView {
             VStack(spacing: 12) {
+                if let notice = settings.migrationNotice {
+                    migrationBanner(notice)
+                }
                 generalSection
-                astrBotSection
-                dockerSection
-                pathsSection
+                servicesSection
                 aboutSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 16)
         }
+    }
+
+    private func migrationBanner(_ notice: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "arrow.right.circle.fill")
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice)
+                    .font(.system(size: 12, weight: .medium))
+                Text("旧版配置已转换为新的服务描述符；AstrBot 保持「持有子进程」，NapCat / Shipyard 转为「委托容器」。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                settings.migrationNotice = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous)
+                .fill(Color.accentColor.opacity(0.10))
+        )
     }
 
     // MARK: - 通用
@@ -97,7 +156,7 @@ struct SettingsSheet: View {
                             .labelsHidden()
                     }
                     .onChange(of: settings.pollingInterval) { _, _ in
-                        appState.restartPolling()
+                        appModel.restartPolling()
                     }
                 }
 
@@ -117,12 +176,6 @@ struct SettingsSheet: View {
                 )
 
                 SettingsToggleRow(
-                    title: "启动时自动运行全部服务",
-                    description: "打开 app 时自动启动 AstrBot / NapCat / Shipyard",
-                    isOn: $settings.autoStartAllServices
-                )
-
-                SettingsToggleRow(
                     title: "服务状态通知",
                     description: "服务启停时显示系统通知",
                     isOn: $settings.enableNotifications
@@ -131,216 +184,55 @@ struct SettingsSheet: View {
         }
     }
 
-    // MARK: - AstrBot
+    // MARK: - 服务管理
 
-    private var astrBotSection: some View {
-        SettingsCard(title: "AstrBot", icon: "gearshape.2.fill", tint: ServiceType.astrbot.accentColor) {
-            VStack(alignment: .leading, spacing: 14) {
-                // 当前状态
-                HStack(spacing: 8) {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(astrBotStatusColor)
-                    Text("当前状态：")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Text(astrBotStatusText)
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                    if let pid = appState.services[.astrbot]?.pid {
-                        Text("PID \(pid)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                Divider().opacity(0.3)
-
-                SettingsRow(title: "启动模式", description: "如何启动 AstrBot 进程") {
-                    Picker("", selection: $settings.astrBotLaunchMode) {
-                        ForEach(AstrBotLaunchMode.allCases) { mode in
-                            Label(mode.displayName, systemImage: mode.iconName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-                }
-
-                // 模式相关输入
-                if settings.astrBotLaunchMode == .uvToolRun {
-                    SettingsPathField(
-                        label: "AstrBot 路径",
-                        text: .constant(AstrBotController.detectAstrbotPath() ?? "未检测到"),
-                        placeholder: "自动检测",
-                        editable: false,
-                        onBrowse: nil
-                    )
-                } else if settings.astrBotLaunchMode == .customCommand {
-                    SettingsTextFieldRow(
-                        title: "自定义命令",
-                        description: "执行完整的 shell 命令",
-                        text: $settings.astrBotCustomCommand,
-                        placeholder: "cd /path && uv run astrbot run"
-                    )
-                } else if settings.astrBotLaunchMode == .executablePath {
-                    SettingsPathFieldRow(
-                        title: "可执行文件",
-                        description: "AstrBot 可执行文件的绝对路径",
-                        text: $settings.astrBotExecutablePath,
-                        placeholder: "/path/to/astrbot",
-                        onBrowse: { pickFile(for: .astrbotExecutable) }
-                    )
-                } else if settings.astrBotLaunchMode == .shellScript {
-                    SettingsPathFieldRow(
-                        title: "启动脚本",
-                        description: "启动 AstrBot 的 shell 脚本",
-                        text: $settings.astrBotScriptPath,
-                        placeholder: "/path/to/launch.sh",
-                        onBrowse: { pickFile(for: .astrbotScript) }
-                    )
-                }
-
-                Divider().opacity(0.3)
-
-                SettingsRow(title: "WebUI 端口", description: "AstrBot WebUI 端口（fallback）") {
-                    HStack(spacing: 6) {
-                        TextField("", value: $settings.astrBotWebPort, format: .number.grouping(.never))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 100)
-                            .multilineTextAlignment(.center)
-                        Stepper("", value: $settings.astrBotWebPort, in: 1...65535, step: 1)
-                            .labelsHidden()
-                    }
-                }
-            }
-        }
-    }
-
-    private var astrBotStatusColor: Color {
-        switch appState.services[.astrbot]?.status {
-        case .running: return .green
-        case .starting, .stopping: return .orange
-        case .error: return .red
-        case .stopped, .unknown: return .gray
-        case .none: return .gray
-        }
-    }
-
-    private var astrBotStatusText: String {
-        appState.services[.astrbot]?.status.displayName ?? "未知"
-    }
-
-    // MARK: - Docker
-
-    private var dockerSection: some View {
-        SettingsCard(title: "Docker 容器", icon: "shippingbox.fill", tint: ServiceType.napcat.accentColor) {
-            VStack(alignment: .leading, spacing: 14) {
-                containerRow(type: .napcat)
-                containerRow(type: .shipyard)
-
-                Divider().opacity(0.3)
-
-                HStack {
-                    Text("已发现 \(appState.allContainers.count) 个容器")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Button {
-                        Task { await appState.refreshContainerList() }
-                    } label: {
-                        Label("刷新列表", systemImage: "arrow.clockwise")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-        }
-    }
-
-    private func containerRow(type: ServiceType) -> some View {
-        SettingsRow(title: type.displayName, description: type.subtitle) {
-            Picker("", selection: Binding(
-                get: { containerName(for: type) },
-                set: { setContainerName(for: type, name: $0) }
-            )) {
-                Text("未选择").tag("")
-                if !containersForType(type).isEmpty {
-                    Divider()
-                }
-                ForEach(containersForType(type)) { c in
-                    Text("\(c.name)").tag(c.name)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(width: 200)
-        }
-    }
-
-    private func containerName(for type: ServiceType) -> String {
-        switch type {
-        case .napcat: return settings.napcatContainer
-        case .shipyard: return settings.shipyardContainer
-        case .astrbot: return ""
-        }
-    }
-
-    private func setContainerName(for type: ServiceType, name: String) {
-        switch type {
-        case .napcat: settings.napcatContainer = name
-        case .shipyard: settings.shipyardContainer = name
-        case .astrbot: break
-        }
-    }
-
-    private func containersForType(_ type: ServiceType) -> [ContainerController.Container] {
-        appState.allContainers.filter { $0.serviceType == type }
-    }
-
-    // MARK: - 路径
-
-    private var pathsSection: some View {
-        SettingsCard(title: "路径", icon: "folder.fill", tint: .blue) {
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsPathFieldRow(
-                    title: "AstrBot 日志",
-                    description: "AstrBot 自己写入的日志文件",
-                    text: $settings.astrbotLogPath,
-                    placeholder: "~/data/logs/astrbot.log",
-                    onBrowse: { pickFile(for: .astrbotLogFile) }
+    private var servicesSection: some View {
+        SettingsCard(title: "服务", icon: "square.grid.2x2.fill", tint: .blue) {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsToggleRow(
+                    title: "启动时自动拉起服务",
+                    description: "总开关；具体拉起哪些服务在下方逐项勾选",
+                    isOn: $settings.autoStartAllServices
                 )
 
                 Divider().opacity(0.3)
 
+                VStack(spacing: 8) {
+                    ForEach(settings.orderedServices) { descriptor in
+                        ServiceManagementRow(
+                            descriptor: descriptor,
+                            autoStartEnabled: $settings.autoStartAllServices,
+                            onToggleAutoStart: { newValue in
+                                var updated = descriptor
+                                updated.autoStart = newValue
+                                settings.update(updated)
+                            },
+                            onEdit: { editingService = descriptor },
+                            onRemove: { showRemoveConfirm = descriptor }
+                        )
+                    }
+                }
+
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("数据目录")
-                            .font(.system(size: 12, weight: .medium))
-                        Text(settings.dataDirectory)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                    Button {
+                        showAddWizard = true
+                    } label: {
+                        Label("添加服务", systemImage: "plus")
+                            .font(.caption)
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
                     Spacer()
+
                     Button {
-                        appState.openDataDirectory()
+                        Task { await appModel.refreshContainers() }
                     } label: {
-                        Image(systemName: "arrow.up.right.square")
+                        Label("刷新容器列表", systemImage: "arrow.clockwise")
+                            .font(.caption)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("在 Finder 中显示")
-                    Button {
-                        pickFile(for: .dataDir)
-                    } label: {
-                        Image(systemName: "folder.badge.gearshape")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("更改目录")
                 }
             }
         }
@@ -354,7 +246,7 @@ struct SettingsSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AI Service Hub")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("v1.0.0 · macOS 26 Tahoe")
+                    Text("\(Self.versionString) · macOS 26 Tahoe")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -373,40 +265,108 @@ struct SettingsSheet: View {
         }
     }
 
-    // MARK: - File Picker
+    /// 版本号从 Info.plist 读取，避免多处硬编码
+    static var versionString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0"
+        return "v\(version)"
+    }
+}
 
-    private enum PickerTarget {
-        case astrbotExecutable, astrbotScript, astrbotLogFile
-        case manualCompose, dataDir
+// MARK: - 服务管理行
+
+struct ServiceManagementRow: View {
+    let descriptor: ServiceDescriptor
+    @Binding var autoStartEnabled: Bool
+    let onToggleAutoStart: (Bool) -> Void
+    let onEdit: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: descriptor.appearance.iconSymbol)
+                .font(.system(size: 13))
+                .foregroundStyle(accent)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(descriptor.name)
+                    .font(.system(size: 12, weight: .medium))
+                HStack(spacing: 4) {
+                    Text(modeLabel)
+                        .font(.system(size: 9))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                    if descriptor.lifecycle == .managed, descriptor.driver == .container,
+                       let container = containerName {
+                        Text(container)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if descriptor.lifecycle == .managed {
+                Toggle("启动时自动拉起", isOn: Binding(
+                    get: { descriptor.autoStart },
+                    set: onToggleAutoStart
+                ))
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+                .disabled(!autoStartEnabled)
+                .help(autoStartEnabled ? "启动本程序时自动拉起这个服务" : "总开关已关闭")
+            } else {
+                Text("只读监控")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .help("本程序不接管这个服务的进程")
+            }
+
+            Button(action: onEdit) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help("编辑")
+
+            Button(action: onRemove) {
+                Image(systemName: "trash")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help("移除")
+        }
+        .padding(.vertical, 2)
     }
 
-    private func pickFile(for target: PickerTarget) {
-        let panel = NSOpenPanel()
-        switch target {
-        case .manualCompose:
-            panel.title = "选择 compose.yml"
-            panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
-        case .dataDir:
-            panel.title = "选择数据目录"
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.directoryURL = URL(fileURLWithPath: settings.expandPath(settings.dataDirectory))
-        default:
-            panel.canChooseFiles = true
-            panel.canChooseDirectories = false
-        }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let path = url.path
-        switch target {
-        case .astrbotExecutable: settings.astrBotExecutablePath = path
-        case .astrbotScript: settings.astrBotScriptPath = path
-        case .astrbotLogFile: settings.astrbotLogPath = path
-        case .manualCompose:
-            if !settings.manualComposePaths.contains(path) {
-                settings.manualComposePaths.append(path)
+    private var modeLabel: String {
+        switch descriptor.lifecycle {
+        case .observed: return "纯监控"
+        case .managed:
+            switch descriptor.driver {
+            case .process: return "持有子进程"
+            case .container: return "委托容器"
+            case nil: return "可管理"
             }
-        case .dataDir: settings.dataDirectory = path
         }
+    }
+
+    private var containerName: String? {
+        if case .container(let spec) = descriptor.managed {
+            return spec.containerName
+        }
+        return nil
+    }
+
+    private var accent: Color {
+        Color(
+            red: descriptor.appearance.accent.red,
+            green: descriptor.appearance.accent.green,
+            blue: descriptor.appearance.accent.blue
+        )
     }
 }
 
@@ -546,65 +506,6 @@ struct SettingsToggleRow: View {
                 .onChange(of: isOn) { _, newValue in
                     onChange?(newValue)
                 }
-        }
-    }
-}
-
-// MARK: - 兼容旧版（保留以防外部引用）
-
-struct SettingsGroup<Content: View>: View {
-    let title: String
-    let icon: String
-    var tintColor: Color = .accentColor
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        SettingsCard(title: title, icon: icon, tint: tintColor) {
-            content()
-        }
-    }
-}
-
-struct SettingsToggle: View {
-    let label: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            Text(label)
-                .font(.system(size: 12))
-        }
-        .toggleStyle(.switch)
-    }
-}
-
-struct SettingsPathField: View {
-    let label: String
-    @Binding var text: String
-    let placeholder: String
-    var editable: Bool = true
-    let onBrowse: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                TextField(placeholder, text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-                    .disabled(!editable)
-                if let onBrowse {
-                    Button {
-                        onBrowse()
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
         }
     }
 }

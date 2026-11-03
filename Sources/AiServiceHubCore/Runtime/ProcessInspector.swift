@@ -131,14 +131,22 @@ public struct ProcessInspector: Sendable {
 
     /// 解析 `lsof -nP -iTCP -sTCP:LISTEN` 的输出，取出监听端口
     static func parseListeningPorts(_ output: String) -> [Int] {
+        // 形如：node 47228 djx 14u IPv4 ... TCP 127.0.0.1:3080 (LISTEN)
+        let pattern = #"TCP\s+\S+:(\d+)\s+\(LISTEN\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
         var ports = Set<Int>()
         for line in output.split(separator: "\n") {
-            // 形如：node 47228 djx 14u IPv4 ... TCP 127.0.0.1:3080 (LISTEN)
-            guard let range = line.range(of: #"TCP\s+\S+:(\d+)\s+\(LISTEN\)"#, options: .regularExpression) else {
+            let text = String(line)
+            let range = NSRange(text.startIndex..., in: text)
+            guard let match = regex.firstMatch(in: text, range: range),
+                  match.numberOfRanges > 1,
+                  let portRange = Range(match.range(at: 1), in: text) else {
                 continue
             }
-            let portText = line[range].split(separator: ":").last.map(String.init) ?? ""
-            if let port = Int(portText) { ports.insert(port) }
+            if let port = Int(text[portRange]) {
+                ports.insert(port)
+            }
         }
         return ports.sorted()
     }

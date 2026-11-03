@@ -1,7 +1,7 @@
 import Foundation
 
 /// 已知日志格式的 WebUI 提取策略
-public enum WebUIKind: String, Sendable, Hashable, CaseIterable {
+public enum WebUIKind: String, Codable, Sendable, Hashable, CaseIterable {
     case astrbot
     case napCat
 }

@@ -1,10 +1,11 @@
 import SwiftUI
 import AppKit
+import AiServiceHubCore
 
 @main
 struct AiServiceHubApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var appState = AppState.shared
+    @StateObject private var appModel = AppModel.shared
     @StateObject private var settings = AppSettings.shared
     @State private var showSettings: Bool = false
 
@@ -36,7 +37,7 @@ struct AiServiceHubApp: App {
         // 关闭后仍可通过 openWindow(id:) 重新显示。
         Window("AI Service Hub", id: "main") {
             MainWindowView(showSettings: $showSettings)
-                .environmentObject(appState)
+                .environmentObject(appModel)
                 .environmentObject(settings)
                 .frame(minWidth: 760, idealWidth: 900, minHeight: 500, idealHeight: 620)
                 .preferredColorScheme(settings.themeMode.colorScheme)
@@ -54,48 +55,62 @@ struct AiServiceHubApp: App {
             // 不再添加 ToolbarCommands() —— macOS 26.5.1 的 .toolbar(id:) 会崩溃
             // 所有 toolbar items 在 .toolbar { } 中固定显示
             CommandMenu("服务") {
-                ForEach(ServiceType.allCases) { type in
-                    Button("启动 \(type.displayName)") {
-                        Task { await appState.startService(type) }
+                ForEach(settings.orderedServices) { descriptor in
+                    Button("启动 \(descriptor.name)") {
+                        Task { await appModel.start(descriptor.id) }
                     }
-                    .keyboardShortcut(shortcutKey(for: type), modifiers: [.command])
+                    .keyboardShortcut(shortcutKey(for: descriptor), modifiers: [.command])
+                    .disabled(descriptor.lifecycle != .managed)
 
-                    Button("停止 \(type.displayName)") {
-                        Task { await appState.stopService(type) }
+                    Button("停止 \(descriptor.name)") {
+                        Task { await appModel.stop(descriptor.id) }
                     }
-                    .keyboardShortcut(shortcutKey(for: type), modifiers: [.command, .shift])
+                    .keyboardShortcut(shortcutKey(for: descriptor), modifiers: [.command, .shift])
+                    .disabled(descriptor.lifecycle != .managed)
                 }
                 Divider()
                 Button("全部启动") {
-                    Task { await appState.startAll() }
+                    Task { await appModel.startAll() }
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 Button("全部停止") {
-                    Task { await appState.stopAll() }
+                    Task { await appModel.stopAll() }
                 }
                 .keyboardShortcut("q", modifiers: [.command, .shift])
             }
         }
     }
 
-    private func shortcutKey(for type: ServiceType) -> KeyEquivalent {
-        switch type {
-        case .napcat: return "1"
-        case .shipyard: return "2"
-        case .astrbot: return "3"
+    /// 每个服务的快捷键（按侧边栏顺序分配数字键）
+    private func shortcutKey(for descriptor: ServiceDescriptor) -> KeyEquivalent {
+        let index = settings.orderedServices.firstIndex { $0.id == descriptor.id } ?? 0
+        let digits: [Character] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        return KeyEquivalent(digits[index % digits.count])
+    }
+}
+
+extension ThemeMode {
+    /// 对应的 SwiftUI 配色方案（nil 表示跟随系统）
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 }
 
-/// AppDelegate - 处理启动时最小化、菜单栏
+/// AppDelegate - 处理启动时最小化、菜单栏、退出清理
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var didCleanUp = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 激活应用（必须在所有窗口设置之前）
         NSApp.setActivationPolicy(.regular)
 
         // 主窗口激活
         DispatchQueue.main.async {
-            for window in NSApp.windows where window.title.contains("AstrBot") {
+            for window in NSApp.windows where window.title.contains("AI Service Hub") {
                 window.makeKeyAndOrderFront(nil)
             }
             NSApp.activate(ignoringOtherApps: true)
@@ -110,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 设置菜单栏（延迟到 UI 准备好后）
         DispatchQueue.main.async {
-            MenuBarController.shared.setup(appState: AppState.shared)
+            MenuBarController.shared.setup(appModel: AppModel.shared)
         }
 
         // 请求通知权限
@@ -118,8 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        // 应用变为活跃时激活主窗口
-        for window in NSApp.windows where window.title.contains("AstrBot") {
+        for window in NSApp.windows where window.title.contains("AI Service Hub") {
             window.makeKeyAndOrderFront(nil)
         }
     }
@@ -128,7 +142,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false  // 主窗口关闭时不退出（菜单栏仍可用）
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        AppState.shared.cleanupOnExit()
+    /// 退出前先做清理（需要 await，因此推迟真正退出）
+    ///
+    /// - daemon 化的进程不在此终止；
+    /// - 容器按各自配置决定是否停止。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !didCleanUp else { return .terminateNow }
+        didCleanUp = true
+        Task { @MainActor in
+            await AppModel.shared.cleanupOnExit()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }

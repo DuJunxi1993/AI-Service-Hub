@@ -57,6 +57,8 @@ public struct LogLine: Identifiable, Sendable, Hashable {
 public enum LogSourceKind: Sendable, Hashable {
     /// 跟随文件尾部
     case file(path: String)
+    /// 跟随一组文件中的最新一个（glob，例如 `~/.dsh/logs/startup-*.log`）
+    case filePattern(pattern: String)
     /// 跟随子进程的标准输出
     case command(executable: String, arguments: [String])
 }
@@ -66,19 +68,26 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
     public let id: String
     public var label: String
     public var kind: LogSourceKind
+    /// 该来源里用哪种规则提取 WebUI 地址（含 token）
+    public var webUIKind: WebUIKind?
 
-    public init(id: String, label: String, kind: LogSourceKind) {
+    public init(id: String, label: String, kind: LogSourceKind, webUIKind: WebUIKind? = nil) {
         self.id = id
         self.label = label
         self.kind = kind
+        self.webUIKind = webUIKind
     }
 
-    public static func file(id: String, label: String, path: String) -> LogSourceSpec {
-        LogSourceSpec(id: id, label: label, kind: .file(path: path))
+    public static func file(id: String, label: String, path: String, webUIKind: WebUIKind? = nil) -> LogSourceSpec {
+        LogSourceSpec(id: id, label: label, kind: .file(path: path), webUIKind: webUIKind)
     }
 
-    public static func command(id: String, label: String, executable: String, arguments: [String]) -> LogSourceSpec {
-        LogSourceSpec(id: id, label: label, kind: .command(executable: executable, arguments: arguments))
+    public static func filePattern(id: String, label: String, pattern: String, webUIKind: WebUIKind? = nil) -> LogSourceSpec {
+        LogSourceSpec(id: id, label: label, kind: .filePattern(pattern: pattern), webUIKind: webUIKind)
+    }
+
+    public static func command(id: String, label: String, executable: String, arguments: [String], webUIKind: WebUIKind? = nil) -> LogSourceSpec {
+        LogSourceSpec(id: id, label: label, kind: .command(executable: executable, arguments: arguments), webUIKind: webUIKind)
     }
 
     // MARK: - Codable
@@ -88,12 +97,15 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         case label
         case kind
         case path
+        case pattern
         case executable
         case arguments
+        case webUIKind
     }
 
     private enum Kind: String, Codable {
         case file
+        case filePattern
         case command
     }
 
@@ -101,9 +113,12 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         label = try container.decode(String.self, forKey: .label)
+        webUIKind = try container.decodeIfPresent(WebUIKind.self, forKey: .webUIKind)
         switch try container.decode(Kind.self, forKey: .kind) {
         case .file:
             kind = .file(path: try container.decode(String.self, forKey: .path))
+        case .filePattern:
+            kind = .filePattern(pattern: try container.decode(String.self, forKey: .pattern))
         case .command:
             kind = .command(
                 executable: try container.decode(String.self, forKey: .executable),
@@ -116,10 +131,14 @@ public struct LogSourceSpec: Identifiable, Codable, Sendable, Hashable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(label, forKey: .label)
+        try container.encodeIfPresent(webUIKind, forKey: .webUIKind)
         switch kind {
         case .file(let path):
             try container.encode(Kind.file, forKey: .kind)
             try container.encode(path, forKey: .path)
+        case .filePattern(let pattern):
+            try container.encode(Kind.filePattern, forKey: .kind)
+            try container.encode(pattern, forKey: .pattern)
         case .command(let executable, let arguments):
             try container.encode(Kind.command, forKey: .kind)
             try container.encode(executable, forKey: .executable)

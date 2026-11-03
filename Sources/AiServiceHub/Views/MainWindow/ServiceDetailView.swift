@@ -1,49 +1,47 @@
 import SwiftUI
+import AiServiceHubCore
 
 /// 服务详情视图 - 玻璃头部 + 操作按钮 + 内联日志
 struct ServiceDetailView: View {
-    let serviceType: ServiceType
-    let service: Service
+    let descriptor: ServiceDescriptor
 
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
     @State private var isLogFullscreen: Bool = false
 
+    private var snapshot: ServiceSnapshot {
+        appModel.snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // 上：头部信息卡片
             headerCard
 
             Divider()
                 .opacity(0.2)
                 .padding(.vertical, 8)
 
-            // 中：详情区（元数据 + 日志），占主要空间
             if isLogFullscreen {
                 InlineLogView(
-                    serviceType: serviceType,
+                    descriptor: descriptor,
                     isFullscreen: true,
                     onEnterFullscreen: {},
-                    onExitFullscreen: { withAnimation(Theme.springAnimation) { isLogFullscreen = false } },
-                    logWatcher: appState.logWatcherRef
+                    onExitFullscreen: { withAnimation(Theme.springAnimation) { isLogFullscreen = false } }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 0) {
-                    // 上半：元数据
                     metadataSection
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     Divider()
                         .opacity(0.2)
 
-                    // 下半：日志（占一半）
                     InlineLogView(
-                        serviceType: serviceType,
+                        descriptor: descriptor,
                         isFullscreen: false,
                         onEnterFullscreen: { withAnimation(Theme.springAnimation) { isLogFullscreen = true } },
-                        onExitFullscreen: {},
-                        logWatcher: appState.logWatcherRef
+                        onExitFullscreen: {}
                     )
                     .frame(maxHeight: .infinity)
                 }
@@ -53,7 +51,6 @@ struct ServiceDetailView: View {
             Divider()
                 .opacity(0.2)
 
-            // 状态栏（最底）
             StatusBarView()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -64,33 +61,41 @@ struct ServiceDetailView: View {
 
     private var headerCard: some View {
         HStack(alignment: .center, spacing: 16) {
-            // 服务大图标
             ZStack {
                 Circle()
-                    .fill(serviceType.accentColor.opacity(0.15))
+                    .fill(accentColor.opacity(0.15))
                     .frame(width: 56, height: 56)
-                Image(systemName: serviceType.iconName)
+                Image(systemName: descriptor.appearance.iconSymbol)
                     .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(serviceType.accentColor)
+                    .foregroundStyle(accentColor)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(serviceType.displayName)
+                    Text(descriptor.name)
                         .font(.title2.weight(.semibold))
 
-                    // 状态徽章
                     HStack(spacing: 4) {
-                        StatusDot(status: service.status)
-                        Text(service.status.displayName)
+                        StatusDot(status: snapshot.status)
+                        Text(snapshot.status.displayName)
                             .font(.caption.weight(.medium))
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(statusBadgeColor.opacity(0.15))
-                    )
+                    .background(Capsule().fill(statusBadgeColor.opacity(0.15)))
+
+                    // 生命周期徽章
+                    HStack(spacing: 3) {
+                        Image(systemName: descriptor.lifecycle == .observed ? "eye.fill" : "bolt.fill")
+                            .font(.system(size: 8))
+                        Text(modeBadgeText)
+                            .font(.caption2.weight(.medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                    .foregroundStyle(.secondary)
+                    .help(descriptor.lifecycle.summary)
                 }
 
                 Text(subtitle)
@@ -100,8 +105,7 @@ struct ServiceDetailView: View {
 
             Spacer()
 
-            // 状态信息
-            if let error = service.lastError, service.status == .error {
+            if let error = snapshot.lastError, snapshot.status == .error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -113,33 +117,48 @@ struct ServiceDetailView: View {
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(serviceType.accentColor.opacity(0.08)), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .glassEffect(.regular.tint(accentColor.opacity(0.08)), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         )
         .padding(.horizontal, 16)
         .padding(.top, 16)
     }
 
+    private var modeBadgeText: String {
+        switch descriptor.lifecycle {
+        case .observed: return "纯监控"
+        case .managed:
+            switch descriptor.driver {
+            case .process: return "持有子进程"
+            case .container: return "委托容器"
+            case nil: return "可管理"
+            }
+        }
+    }
+
+    private var accentColor: Color {
+        Color(
+            red: descriptor.appearance.accent.red,
+            green: descriptor.appearance.accent.green,
+            blue: descriptor.appearance.accent.blue
+        )
+    }
+
     private var statusBadgeColor: Color {
-        switch service.status {
+        switch snapshot.status {
         case .running: return .green
         case .stopped: return .gray
         case .starting, .stopping: return .orange
         case .error: return .red
+        case .degraded: return .orange
         case .unknown: return .gray
         }
     }
 
     private var subtitle: String {
-        if let image = service.image {
-            return image
-        }
-        if let container = service.containerName {
-            return container
-        }
-        if let pid = service.pid {
-            return "PID: \(pid)"
-        }
-        return serviceType.subtitle
+        if let image = snapshot.image { return image }
+        if let container = snapshot.containerName { return container }
+        if let pid = snapshot.pid { return "PID: \(pid)" }
+        return descriptor.note ?? descriptor.lifecycle.summary
     }
 
     // MARK: - 元数据
@@ -147,76 +166,198 @@ struct ServiceDetailView: View {
     private var metadataSection: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if serviceType == .astrbot {
-                    astrBotMetadata
-                } else {
-                    containerMetadata
+                metadataRows
+
+                if !snapshot.probeResults.isEmpty {
+                    Divider().opacity(0.3)
+                    probeSection
                 }
 
-                // 操作按钮（额外的大按钮）
-                HStack(spacing: 12) {
-                    Spacer()
-                    Button {
-                        Task { await appState.startService(serviceType) }
-                    } label: {
-                        Label("启动", systemImage: "play.fill")
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(Theme.startColor)
-                    .disabled(!service.status.canStart)
-                    .controlSize(.large)
-
-                    Button(role: .destructive) {
-                        Task { await appState.stopService(serviceType) }
-                    } label: {
-                        Label("停止", systemImage: "stop.fill")
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(Theme.stopColor)
-                    .disabled(!service.status.canStop)
-                    .controlSize(.large)
-
-                    Button {
-                        Task { await appState.restartService(serviceType) }
-                    } label: {
-                        Label("重启", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(service.status != .running)
-                    .controlSize(.large)
-
-                    Button {
-                        appState.openWebUI(serviceType)
-                    } label: {
-                        Label("打开 WebUI", systemImage: "safari")
-                    }
-                    .buttonStyle(.glassProminent)
-                    .disabled(service.webURL == nil)
-                    .controlSize(.large)
-                    .help(service.webURL?.absoluteString ?? "等待服务启动...")
-                    Spacer()
-                }
-                .padding(.top, 8)
+                actionButtons
             }
             .padding(20)
         }
     }
 
-    private var astrBotMetadata: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            MetadataRow(label: "进程 PID", value: service.pid.map { String($0) } ?? "—")
-            MetadataRow(label: "WebUI 端口", value: "\(settings.astrBotWebPort)")
-            MetadataRow(label: "启动模式", value: settings.astrBotLaunchMode.displayName)
-            MetadataRow(label: "数据目录", value: settings.dataDirectory)
+    @ViewBuilder
+    private var metadataRows: some View {
+        switch descriptor.managed {
+        case .process(let spec):
+            VStack(alignment: .leading, spacing: 8) {
+                MetadataRow(label: "进程 PID", value: snapshot.pid.map { String($0) } ?? "—")
+                MetadataRow(label: "可执行文件", value: spec.executable)
+                MetadataRow(label: "参数", value: spec.arguments.isEmpty ? "—" : spec.arguments.joined(separator: " "))
+                MetadataRow(label: "工作目录", value: spec.workingDirectory ?? "继承")
+                MetadataRow(label: "运行方式", value: spec.shellMode ? "经 shell 执行" : "直接执行")
+                MetadataRow(
+                    label: "退出行为",
+                    value: spec.ownership.detached
+                        ? (spec.ownership.stopOnAppQuit ? "daemon 化 · 退出时终止" : "daemon 化 · 退出后继续运行")
+                        : (spec.ownership.stopOnAppQuit ? "随 app 退出" : "随 app 退出 · 保留进程")
+                )
+                if !snapshot.listeningPorts.isEmpty {
+                    MetadataRow(label: "监听端口", value: snapshot.listeningPorts.map(String.init).joined(separator: ", "))
+                }
+                MetadataRow(label: "来源", value: snapshot.startedByUs ? "本程序启动" : "外部启动")
+            }
+
+        case .container(let spec):
+            VStack(alignment: .leading, spacing: 8) {
+                MetadataRow(label: "容器名", value: snapshot.containerName ?? spec.containerName)
+                MetadataRow(label: "镜像", value: snapshot.image ?? "—")
+                MetadataRow(label: "端口映射", value: snapshot.ports.isEmpty ? "—" : snapshot.ports.joined(separator: ", "))
+                MetadataRow(label: "退出行为", value: spec.stopOnAppQuit ? "退出时停止容器" : "退出时保留容器")
+            }
+
+        case nil:
+            VStack(alignment: .leading, spacing: 8) {
+                MetadataRow(label: "生命周期", value: "纯监控（不接管进程）")
+                if let pid = snapshot.pid {
+                    MetadataRow(label: "进程 PID", value: String(pid))
+                }
+                if !snapshot.listeningPorts.isEmpty {
+                    MetadataRow(label: "监听端口", value: snapshot.listeningPorts.map(String.init).joined(separator: ", "))
+                }
+                MetadataRow(label: "说明", value: descriptor.note ?? "—")
+            }
         }
     }
 
-    private var containerMetadata: some View {
+    private var probeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("探测结果")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(snapshot.probeResults) { result in
+                ProbeResultView(result: result)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: 12) {
+            Spacer()
+
+            if descriptor.lifecycle == .managed {
+                Button {
+                    Task { await appModel.start(descriptor.id) }
+                } label: {
+                    Label("启动", systemImage: "play.fill")
+                }
+                .buttonStyle(.glassProminent)
+                .tint(Theme.startColor)
+                .disabled(!snapshot.status.canStart)
+                .controlSize(.large)
+
+                Button(role: .destructive) {
+                    Task { await appModel.stop(descriptor.id) }
+                } label: {
+                    Label("停止", systemImage: "stop.fill")
+                }
+                .buttonStyle(.glassProminent)
+                .tint(Theme.stopColor)
+                .disabled(!snapshot.status.canStop)
+                .controlSize(.large)
+
+                Button {
+                    Task { await appModel.restart(descriptor.id) }
+                } label: {
+                    Label("重启", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.glass)
+                .disabled(snapshot.status == .stopped || snapshot.status == .unknown)
+                .controlSize(.large)
+            }
+
+            Button {
+                appModel.openWebUI(descriptor.id)
+            } label: {
+                Label("打开 WebUI", systemImage: "safari")
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(snapshot.webURL == nil)
+            .controlSize(.large)
+            .help(snapshot.webURL?.absoluteString ?? "没有可用的 WebUI 地址")
+
+            Spacer()
+        }
+        .padding(.top, 8)
+    }
+}
+
+/// 探测结果卡片
+struct ProbeResultView: View {
+    let result: ProbeResult
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MetadataRow(label: "容器名", value: service.containerName ?? "—")
-            MetadataRow(label: "镜像", value: service.image ?? "—")
-            MetadataRow(label: "端口映射", value: service.ports.isEmpty ? "—" : service.ports.joined(separator: ", "))
-            MetadataRow(label: "状态", value: service.status.displayName)
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(result.label)
+                    .font(.system(size: 12, weight: .medium))
+                Text(result.summary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            ForEach(result.groups) { group in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    ForEach(group.rows) { row in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(row.label)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 110, alignment: .leading)
+                            Text(row.value)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(rowTint(row.state))
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
+    }
+
+    private var iconName: String {
+        switch result.state {
+        case .ok: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .failed: return "xmark.circle.fill"
+        case .unknown: return "questionmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch result.state {
+        case .ok: return .green
+        case .warning: return .orange
+        case .failed: return .red
+        case .unknown: return .gray
+        }
+    }
+
+    private func rowTint(_ state: ProbeState?) -> Color {
+        guard let state else { return .primary }
+        switch state {
+        case .ok: return .primary
+        case .warning: return .orange
+        case .failed: return .red
+        case .unknown: return .secondary
         }
     }
 }
@@ -236,6 +377,8 @@ struct MetadataRow: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer()
         }
     }

@@ -1,4 +1,19 @@
 import SwiftUI
+import AiServiceHubCore
+
+/// 状态的界面配色（Core 不依赖 SwiftUI，映射放在 App 层）
+extension ServiceStatus {
+    var color: Color {
+        switch self {
+        case .unknown: return Color.gray.opacity(0.5)
+        case .stopped: return Color.gray
+        case .starting, .stopping: return Color.orange
+        case .running: return Color.green
+        case .degraded: return Color.orange
+        case .error: return Color.red
+        }
+    }
+}
 
 /// 服务状态指示点（带脉冲动画）
 struct StatusDot: View {

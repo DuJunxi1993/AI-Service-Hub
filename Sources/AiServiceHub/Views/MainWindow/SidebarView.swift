@@ -1,23 +1,23 @@
 import SwiftUI
+import AiServiceHubCore
 
 /// 侧边栏 - 系统默认 Liquid Glass，支持拖动排序
 struct SidebarView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
-    @Binding var selection: ServiceType?
 
     var body: some View {
-        List(selection: $selection) {
+        List(selection: $settings.selectedServiceID) {
             Section {
-                // 按 settings.serviceOrder 顺序渲染（支持用户拖动）
-                ForEach(settings.serviceOrder, id: \.self) { type in
-                    if let service = appState.services[type] {
-                        SidebarItemView(serviceType: type, service: service)
-                            .tag(type)
-                    }
+                ForEach(settings.orderedServices) { descriptor in
+                    SidebarItemView(
+                        descriptor: descriptor,
+                        snapshot: appModel.snapshots[descriptor.id]
+                    )
+                    .tag(descriptor.id)
                 }
                 .onMove { from, to in
-                    settings.serviceOrder.move(fromOffsets: from, toOffset: to)
+                    settings.moveServices(from: from, to: to)
                 }
             } header: {
                 Text("服务")
@@ -32,20 +32,20 @@ struct SidebarView: View {
 
 /// 单个侧边栏项
 struct SidebarItemView: View {
-    let serviceType: ServiceType
-    let service: Service
+    let descriptor: ServiceDescriptor
+    let snapshot: ServiceSnapshot?
 
     var body: some View {
         HStack(spacing: 10) {
             // 服务图标
-            Image(systemName: serviceType.iconName)
+            Image(systemName: descriptor.appearance.iconSymbol)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(serviceType.accentColor)
+                .foregroundStyle(accentColor)
                 .frame(width: 24)
 
             // 名称 + 副信息
             VStack(alignment: .leading, spacing: 1) {
-                Text(serviceType.displayName)
+                Text(descriptor.name)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
 
@@ -54,25 +54,45 @@ struct SidebarItemView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+
+            Spacer(minLength: 4)
+
+            // 生命周期徽章：纯监控 / 可管理
+            if descriptor.lifecycle == .observed {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .help("纯监控：本程序不接管这个服务的进程")
+            }
         }
         .padding(.vertical, 4)
         .listRowSeparator(.hidden)
     }
 
+    private var accentColor: Color {
+        Color(
+            red: descriptor.appearance.accent.red,
+            green: descriptor.appearance.accent.green,
+            blue: descriptor.appearance.accent.blue
+        )
+    }
+
     private var subtitleText: String {
-        if serviceType == .astrbot {
-            if let pid = service.pid {
-                return "PID: \(pid)"
-            }
-            return serviceType.subtitle
-        } else {
-            if let container = service.containerName {
-                return container
-            }
-            if service.status == .unknown {
+        switch descriptor.lifecycle {
+        case .observed:
+            return snapshot?.status.displayName ?? "未探测"
+        case .managed:
+            switch descriptor.managed {
+            case .process:
+                if let pid = snapshot?.pid {
+                    return "PID: \(pid)"
+                }
+                return snapshot?.status.displayName ?? "未探测"
+            case .container(let spec):
+                return spec.containerName
+            case nil:
                 return "未配置"
             }
-            return serviceType.subtitle
         }
     }
 }

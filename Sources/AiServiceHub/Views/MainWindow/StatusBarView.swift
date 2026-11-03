@@ -1,8 +1,9 @@
 import SwiftUI
+import AiServiceHubCore
 
 /// 状态栏 - 底部 capsule 玻璃
 struct StatusBarView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
 
     var body: some View {
@@ -11,7 +12,7 @@ struct StatusBarView: View {
             HStack(spacing: 4) {
                 Image(systemName: "chart.bar.fill")
                     .font(.system(size: 9))
-                Text("\(appState.runningCount) / \(appState.totalCount) 运行中")
+                Text("\(appModel.runningCount) / \(appModel.totalCount) 运行中")
                     .font(.system(size: 10, weight: .medium))
                     .monospacedDigit()
             }
@@ -31,13 +32,13 @@ struct StatusBarView: View {
 
             Spacer()
 
-            // 三个状态点
+            // 各个服务的状态点
             HStack(spacing: 8) {
-                ForEach(ServiceType.allCases) { type in
-                    if let svc = appState.services[type] {
+                ForEach(settings.orderedServices) { descriptor in
+                    if let snapshot = appModel.snapshots[descriptor.id] {
                         HStack(spacing: 3) {
-                            StatusDot(status: svc.status)
-                            Text(type.displayName)
+                            StatusDot(status: snapshot.status)
+                            Text(descriptor.name)
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
                         }

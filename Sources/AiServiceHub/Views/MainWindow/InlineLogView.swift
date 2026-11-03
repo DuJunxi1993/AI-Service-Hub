@@ -1,156 +1,39 @@
 import SwiftUI
+import AiServiceHubCore
 
-/// 内联日志视图 - 性能优化版
-/// - filteredLines 改 @State 缓存（避免每次 render 重算）
-/// - scrollTo 去掉 withAnimation（避免每行触发 layout pass）
-/// - Pause 用 LogWatcher.isPaused（保留历史）
-/// - Clear 用 clear(source:)（只清当前服务）
+/// 内联日志视图
+///
+/// 日志由 `LogHub` 常驻采集，本视图只是它的一个订阅者：
+/// - 切换服务不会中断其他服务的采集
+/// - 反复切换不会重复拉取历史（历史只读一次并缓存）
+/// - 暂停是视图级的，不会影响其他视图
 struct InlineLogView: View {
-    let serviceType: ServiceType
+    let descriptor: ServiceDescriptor
     let isFullscreen: Bool
     let onEnterFullscreen: () -> Void
     let onExitFullscreen: () -> Void
 
-    @EnvironmentObject var appState: AppState
-    // 直接观察 logWatcher，让 lines 变化触发 view 更新
-    @ObservedObject private var logWatcher: LogWatcher
+    @EnvironmentObject var appModel: AppModel
 
     @State private var searchText: String = ""
-    @State private var cachedLines: [LogLine] = []  // 性能：缓存避免重复过滤
+    @State private var allLines: [LogLine] = []
+    @State private var cachedLines: [LogLine] = []
+    @State private var isPaused: Bool = false
+    @State private var streamTask: Task<Void, Never>?
 
-    /// 注入 logWatcher 的 init（必须显式传入，因为是 private）
-    init(serviceType: ServiceType,
-         isFullscreen: Bool,
-         onEnterFullscreen: @escaping () -> Void,
-         onExitFullscreen: @escaping () -> Void,
-         logWatcher: LogWatcher) {
-        self.serviceType = serviceType
-        self.isFullscreen = isFullscreen
-        self.onEnterFullscreen = onEnterFullscreen
-        self.onExitFullscreen = onExitFullscreen
-        self._logWatcher = ObservedObject(initialValue: logWatcher)
-    }
+    private static let bufferLimit = 2000
 
     private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
     }()
 
     var body: some View {
         VStack(spacing: 0) {
-            // 工具栏
-            HStack(spacing: 8) {
-                Text("实时日志")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-
-                if !searchText.isEmpty {
-                    Text("(\(cachedLines.count) 条)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer()
-
-                HStack(spacing: 4) {
-                    // 搜索
-                    HStack(spacing: 4) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                        TextField("搜索", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 11))
-                            .frame(width: 100)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular, in: Capsule(style: .continuous))
-                    )
-
-                    // 暂停/继续
-                    Button {
-                        logWatcher.isPaused.toggle()
-                    } label: {
-                        Image(systemName: logWatcher.isPaused ? "play.fill" : "pause.fill")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .help(logWatcher.isPaused ? "继续接收新日志" : "暂停接收新日志（保留已显示历史）")
-
-                    // 复制
-                    Button {
-                        let text = cachedLines.map { "\(Self.timeFormatter.string(from: $0.timestamp)) \($0.content)" }.joined(separator: "\n")
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .help("复制全部过滤结果")
-
-                    // 清空（只清当前服务）
-                    Button {
-                        logWatcher.clear(source: currentSource)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .help("清空此服务的日志（不影响其他服务）")
-
-                    // 全屏
-                    Button {
-                        if isFullscreen {
-                            onExitFullscreen()
-                        } else {
-                            onEnterFullscreen()
-                        }
-                    } label: {
-                        Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-
+            toolbar
             Divider().opacity(0.2)
-
-            // 日志内容
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if cachedLines.isEmpty {
-                            EmptyLogView()
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
-                        } else {
-                            ForEach(cachedLines) { line in
-                                LogRowView(line: line)
-                                    .id(line.id)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .onChange(of: cachedLines.count) { _, _ in
-                    // 性能：去掉 withAnimation（避免每行触发 layout pass）
-                    if !logWatcher.isPaused, let last = cachedLines.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-            }
+            content
         }
         .background(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 12, style: .continuous)
@@ -159,68 +42,187 @@ struct InlineLogView: View {
         )
         .padding(.horizontal, isFullscreen ? 0 : 16)
         .padding(.bottom, isFullscreen ? 0 : 8)
-        .onAppear {
-            startLogStream()
-            refreshCache()
-        }
-        .onChange(of: serviceType) { _, _ in
-            startLogStream()
-            refreshCache()
+        .onAppear { subscribe() }
+        .onDisappear { cancelSubscription() }
+        .onChange(of: descriptor.id) { _, _ in
+            subscribe()
         }
         .onChange(of: searchText) { _, _ in
-            refreshCache()
-        }
-        .onChange(of: logWatcher.lines.count) { _, _ in
-            refreshCache()
+            applyFilter()
         }
     }
 
-    /// 当前 service 对应的 LogSource
-    private var currentSource: LogSource {
-        switch serviceType {
-        case .astrbot: return .astrbot
-        case .napcat: return .napcat
-        case .shipyard: return .shipyard
-        }
-    }
+    // MARK: - 工具栏
 
-    /// 启动当前 service 的日志流（不停 watcher，不清空所有日志）
-    /// - 切换 service 时 stop 当前 stream，重启新 stream
-    /// - 不调用 clear() —— 保留所有 service 的历史日志（包括 pause 的效果）
-    private func startLogStream() {
-        logWatcher.stop()
-        // 注意：不调用 clear()，保留其他 service 的历史
-        switch serviceType {
-        case .astrbot:
-            let path = (AppSettings.shared.astrbotLogPath as NSString).expandingTildeInPath
-            logWatcher.watchAstrBotLogFile(path)
-        case .napcat:
-            let containerName = AppSettings.shared.napcatContainer
-            if !containerName.isEmpty {
-                logWatcher.startContainerLogStream(containerName: containerName, source: .napcat)
-            } else {
-                appState.appendLog(level: .warn, source: .napcat, content: "未配置 NapCat 容器")
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            Text("实时日志")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            if !searchText.isEmpty {
+                Text("(\(cachedLines.count) 条)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-        case .shipyard:
-            let containerName = AppSettings.shared.shipyardContainer
-            if !containerName.isEmpty {
-                logWatcher.startContainerLogStream(containerName: containerName, source: .shipyard)
-            } else {
-                appState.appendLog(level: .warn, source: .shipyard, content: "未配置 Shipyard 容器")
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                // 搜索
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    TextField("搜索", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .frame(width: 100)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(.clear)
+                        .glassEffect(.regular, in: Capsule(style: .continuous))
+                )
+
+                // 暂停 / 继续
+                Button {
+                    togglePause()
+                } label: {
+                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help(isPaused ? "继续接收新日志" : "暂停接收新日志（保留已显示历史）")
+
+                // 复制
+                Button {
+                    let text = cachedLines
+                        .map { "\(Self.timeFormatter.string(from: $0.timestamp)) \($0.content)" }
+                        .joined(separator: "\n")
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help("复制全部过滤结果")
+
+                // 清空（只清当前服务）
+                Button {
+                    Task {
+                        await appModel.hub.removeService(serviceID: descriptor.id)
+                        allLines = []
+                        applyFilter()
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help("清空此服务的日志（不影响其他服务）")
+
+                // 全屏
+                Button {
+                    if isFullscreen {
+                        onExitFullscreen()
+                    } else {
+                        onEnterFullscreen()
+                    }
+                } label: {
+                    Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - 内容
+
+    private var content: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if cachedLines.isEmpty {
+                        EmptyLogView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else {
+                        ForEach(cachedLines) { line in
+                            LogRowView(line: line)
+                                .id(line.id)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .onChange(of: cachedLines.count) { _, _ in
+                if !isPaused, let last = cachedLines.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
             }
         }
     }
 
-    /// 性能：缓存过滤结果
-    /// 只在以下情况重算：searchText 变 / logWatcher.lines.count 变 / serviceType 变
-    private func refreshCache() {
-        let source = currentSource
-        let search = searchText
-        let all = logWatcher.lines.filter { $0.source == source }
-        if search.isEmpty {
-            cachedLines = all
+    // MARK: - 订阅
+
+    private func subscribe() {
+        cancelSubscription()
+        streamTask = Task {
+            // 先取一次历史（Hub 里已经缓存，不会重复）
+            let history = await appModel.hub.history(serviceID: descriptor.id)
+            await MainActor.run {
+                allLines = history
+                applyFilter()
+            }
+            // 再持续接收
+            for await batch in await appModel.hub.subscribe(serviceID: descriptor.id) {
+                await MainActor.run {
+                    guard !isPaused else { return }
+                    allLines.append(contentsOf: batch)
+                    if allLines.count > Self.bufferLimit {
+                        allLines.removeFirst(allLines.count - Self.bufferLimit)
+                    }
+                    applyFilter()
+                }
+            }
+        }
+    }
+
+    private func cancelSubscription() {
+        streamTask?.cancel()
+        streamTask = nil
+    }
+
+    private func togglePause() {
+        isPaused.toggle()
+        if !isPaused {
+            // 恢复时把暂停期间 hub 继续采集到的内容补回来
+            Task {
+                let history = await appModel.hub.history(serviceID: descriptor.id)
+                await MainActor.run {
+                    allLines = history
+                    applyFilter()
+                }
+            }
+        }
+    }
+
+    private func applyFilter() {
+        if searchText.isEmpty {
+            cachedLines = allLines
         } else {
-            cachedLines = all.filter { $0.content.localizedCaseInsensitiveContains(search) }
+            cachedLines = allLines.filter { $0.content.localizedCaseInsensitiveContains(searchText) }
         }
     }
 }
@@ -230,9 +232,9 @@ struct LogRowView: View {
     let line: LogLine
 
     private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MM-dd HH:mm:ss"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm:ss"
+        return formatter
     }()
 
     var body: some View {
