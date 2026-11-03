@@ -1,14 +1,19 @@
 #!/bin/bash
-# AstrBot Launcher - 快速运行（开发模式）
+# AI Service Hub - 快速运行（开发模式）
 set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-CONFIG="${CONFIG:-debug}"
+SCRIPT_DIR="$(pwd)"
+source "$SCRIPT_DIR/scripts/xcode-env.sh"
 
-if [ ! -f ".build/$CONFIG/AstrbotLauncher" ]; then
+CONFIG="${CONFIG:-debug}"
+BIN=".build/$CONFIG/AiServiceHub"
+
+if [ ! -f "$BIN" ]; then
+    require_developer_dir
     echo "==> 编译 ($CONFIG)..."
     swift build -c "$CONFIG"
 fi
 
-echo "==> 启动 AstrBot Launcher..."
-.build/$CONFIG/AstrbotLauncher
+echo "==> 启动 AI Service Hub..."
+"$BIN"

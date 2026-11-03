@@ -1,53 +1,20 @@
 #!/bin/bash
 set -e
 
-# AstrBot Launcher - 构建脚本
-# 编译并打包为 AstrbotLauncher.app
+# AI Service Hub - 构建脚本
+# 编译并打包为 AiServiceHub.app
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-APP_NAME="AstrbotLauncher"
+APP_NAME="AiServiceHub"
 APP_BUNDLE="$SCRIPT_DIR/${APP_NAME}.app"
+ICON_FILE="ai_service_hub.icns"
 CONFIG="${CONFIG:-release}"
 
-# 选择可用的 Xcode。
-# CommandLineTools 不含 SwiftUI 的宏插件（libSwiftUIMacros.dylib），
-# 用它编译会以 "external macro implementation type 'SwiftUIMacros.StateMacro'
-# could not be found" 失败，因此必须指向一份完整 Xcode。
-detect_developer_dir() {
-    # 1. 用户已显式指定
-    if [ -n "$DEVELOPER_DIR" ] && [ -d "$DEVELOPER_DIR" ]; then
-        echo "$DEVELOPER_DIR"; return 0
-    fi
-    # 2. xcode-select 当前指向的若是完整 Xcode，直接用
-    local selected
-    selected="$(xcode-select -p 2>/dev/null || true)"
-    case "$selected" in
-        */CommandLineTools|"") selected="" ;;
-    esac
-    if [ -n "$selected" ]; then
-        echo "$selected"; return 0
-    fi
-    # 3. 扫描 /Applications：优先正式版 Xcode.app，其次变体（-beta 等）
-    local official="/Applications/Xcode.app/Contents/Developer"
-    if [ -d "$official" ]; then
-        echo "$official"; return 0
-    fi
-    local candidate
-    for candidate in $(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort -r); do
-        echo "$candidate"; return 0
-    done
-    return 1
-}
-
-if ! DETECTED_DEVELOPER_DIR="$(detect_developer_dir)"; then
-    echo "❌ 未找到可用的 Xcode（CommandLineTools 无法编译本项目）"
-    echo "   请安装 Xcode，或设置 DEVELOPER_DIR 指向完整 Xcode"
-    exit 1
-fi
-export DEVELOPER_DIR="$DETECTED_DEVELOPER_DIR"
-echo "==> 工具链: $DEVELOPER_DIR"
+# 选择可用的 Xcode（详见 scripts/xcode-env.sh）
+source "$SCRIPT_DIR/scripts/xcode-env.sh"
+require_developer_dir
 
 echo "==> 编译 ($CONFIG)..."
 swift build -c "$CONFIG"
@@ -69,41 +36,12 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
-# 复制图标
-# 优先用 macOS 14+ 的 .icon 文件夹格式（自动编译成 .icns）
-ICON_SOURCE_DIR="$HOME/Downloads/Astrbot_Launcher.icon"
-if [ -d "$ICON_SOURCE_DIR" ] && [ -f "$ICON_SOURCE_DIR/icon.json" ]; then
-    # 从 .icon 编译成 .icns（用 sips 生成多分辨率，iconutil 打包）
-    TMP_ICONSET=$(mktemp -d)
-    SRC_PNG="$ICON_SOURCE_DIR/Assets/astrbot_launcher.png"
-    if [ ! -f "$SRC_PNG" ] || [ $(sips -g pixelWidth "$SRC_PNG" 2>/dev/null | awk '{print $2}') -lt 256 ]; then
-        echo "    ⚠️ 源 PNG 太小（<256px），用现有 astrbot_launcher.icns"
-    else
-        sips --resampleWidth 16   "$SRC_PNG" --out "$TMP_ICONSET/icon_16x16.png"     > /dev/null
-        sips --resampleWidth 32   "$SRC_PNG" --out "$TMP_ICONSET/icon_16x16@2x.png"  > /dev/null
-        sips --resampleWidth 32   "$SRC_PNG" --out "$TMP_ICONSET/icon_32x32.png"     > /dev/null
-        sips --resampleWidth 64   "$SRC_PNG" --out "$TMP_ICONSET/icon_32x32@2x.png"  > /dev/null
-        sips --resampleWidth 128  "$SRC_PNG" --out "$TMP_ICONSET/icon_128x128.png"   > /dev/null
-        sips --resampleWidth 256  "$SRC_PNG" --out "$TMP_ICONSET/icon_128x128@2x.png" > /dev/null
-        sips --resampleWidth 256  "$SRC_PNG" --out "$TMP_ICONSET/icon_256x256.png"   > /dev/null
-        sips --resampleWidth 512  "$SRC_PNG" --out "$TMP_ICONSET/icon_256x256@2x.png" > /dev/null
-        sips --resampleWidth 512  "$SRC_PNG" --out "$TMP_ICONSET/icon_512x512.png"   > /dev/null
-        cp "$SRC_PNG" "$TMP_ICONSET/icon_512x512@2x.png"
-        iconutil --convert icns --output "$APP_BUNDLE/Contents/Resources/AppIcon.icns" "$TMP_ICONSET"
-        rm -rf "$TMP_ICONSET"
-        echo "    ✓ 图标已编译 (.icon → .icns)"
-        # 同时把最新的 .icns 复制到项目根，下次 build 优先用它
-        cp "$APP_BUNDLE/Contents/Resources/AppIcon.icns" "astrbot_launcher.icns"
-    fi
-fi
-# 优先用 Pictures 里的新 .icns（如果存在且大于 50KB）
-PICTURES_ICNS="$HOME/Pictures/icons/astrbot_launcher.icns"
-if [ -f "$PICTURES_ICNS" ] && [ $(stat -f "%z" "$PICTURES_ICNS" 2>/dev/null) -gt 50000 ]; then
-    cp "$PICTURES_ICNS" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
-    echo "    ✓ 图标已复制 (~/Pictures/icons/astrbot_launcher.icns)"
-elif [ -f "astrbot_launcher.icns" ]; then
-    cp "astrbot_launcher.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
-    echo "    ✓ 图标已复制 (.icns 缓存)"
+# 复制图标（仅使用仓库内版本，保证构建可复现）
+if [ -f "$ICON_FILE" ]; then
+    cp "$ICON_FILE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    echo "    ✓ 图标已复制 ($ICON_FILE)"
+else
+    echo "    ⚠️ 缺少 $ICON_FILE，bundle 将使用系统默认图标"
 fi
 
 # 设置可执行权限

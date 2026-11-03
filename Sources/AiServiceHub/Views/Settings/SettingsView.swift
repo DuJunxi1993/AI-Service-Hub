@@ -352,7 +352,7 @@ struct SettingsSheet: View {
         SettingsCard(title: "关于", icon: "info.circle.fill", tint: .secondary) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AstrBot Launcher")
+                    Text("AI Service Hub")
                         .font(.system(size: 13, weight: .semibold))
                     Text("v1.0.0 · macOS 26 Tahoe")
                         .font(.caption)

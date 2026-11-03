@@ -2,17 +2,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "AstrbotLauncher",
+    name: "AiServiceHub",
     platforms: [
         .macOS(.v26)
     ],
     products: [
-        .executable(name: "AstrbotLauncher", targets: ["AstrbotLauncher"])
+        .executable(name: "AiServiceHub", targets: ["AiServiceHub"])
     ],
     targets: [
         .executableTarget(
-            name: "AstrbotLauncher",
-            path: "Sources/AstrbotLauncher",
+            name: "AiServiceHub",
+            path: "Sources/AiServiceHub",
             swiftSettings: [
                 .enableUpcomingFeature("BareSlashRegexLiterals"),
                 .enableExperimentalFeature("StrictConcurrency")

@@ -46,29 +46,29 @@ jobs:
 
       - name: Verify bundle
         run: |
-          test -d AstrbotLauncher.app
-          test -x AstrbotLauncher.app/Contents/MacOS/AstrbotLauncher
-          du -sh AstrbotLauncher.app
+          test -d AiServiceHub.app
+          test -x AiServiceHub.app/Contents/MacOS/AiServiceHub
+          du -sh AiServiceHub.app
 
       - name: Zip app bundle
         if: success()
         run: |
-          cd AstrbotLauncher.app
-          zip -r ../AstrbotLauncher-macOS.zip .
+          cd AiServiceHub.app
+          zip -r ../AiServiceHub-macOS.zip .
 
       - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AstrbotLauncher-macOS
-          path: AstrbotLauncher-macOS.zip
+          name: AiServiceHub-macOS
+          path: AiServiceHub-macOS.zip
           if-no-files-found: error
 
       - name: Create Release
         if: success() && startsWith(github.ref, 'refs/tags/macos-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AstrbotLauncher-macOS.zip
+          files: AiServiceHub-macOS.zip
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

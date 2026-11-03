@@ -3,7 +3,7 @@ import os
 
 /// 内部调试日志
 enum AppLog {
-    private static let logger = Logger(subsystem: "com.djx.astrbotlauncher", category: "general")
+    private static let logger = Logger(subsystem: "com.djx.aiservicehub", category: "general")
 
     static func debug(_ message: String) {
         logger.debug("\(message, privacy: .public)")

@@ -17,7 +17,7 @@ build/
 Package.resolved
 
 # App bundle
-AstrbotLauncher.app/
+AiServiceHub.app/
 
 # Logs
 *.log

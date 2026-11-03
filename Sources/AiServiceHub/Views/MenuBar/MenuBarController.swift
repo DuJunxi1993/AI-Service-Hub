@@ -19,7 +19,7 @@ final class MenuBarController: ObservableObject {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "bolt.circle.fill", accessibilityDescription: "AstrBot Launcher")
+            button.image = NSImage(systemSymbolName: "bolt.circle.fill", accessibilityDescription: "AI Service Hub")
             button.image?.isTemplate = true
             button.action = #selector(handleClick(_:))
             button.target = self
@@ -78,7 +78,7 @@ final class MenuBarController: ObservableObject {
         menu.autoenablesItems = false
 
         // 标题
-        let titleItem = NSMenuItem(title: "AstrBot Launcher", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "AI Service Hub", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
 

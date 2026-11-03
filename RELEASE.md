@@ -1,4 +1,4 @@
-# AstrBot Launcher — Release Notes
+# AI Service Hub — Release Notes
 
 macOS 端的发布记录。最新版本在顶部，历史变更在下方按时间倒序排列。
 
@@ -14,8 +14,8 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
-| `AstrbotLauncher-1.0.3.dmg` | 557 KB | `3f32ca806f37abf97fb36672db200fd61ce5c3d8ae2f7ac6708eb948284440f6` |
-| `AstrbotLauncher-1.0.3-macOS.zip` | 549 KB | `5b7278d5f4b90cc3ef0e31569d7f515423ccb78686030ac5cfc54ffca644b805` |
+| `AiServiceHub-1.0.3.dmg` | 557 KB | `3f32ca806f37abf97fb36672db200fd61ce5c3d8ae2f7ac6708eb948284440f6` |
+| `AiServiceHub-1.0.3-macOS.zip` | 549 KB | `5b7278d5f4b90cc3ef0e31569d7f515423ccb78686030ac5cfc54ffca644b805` |
 
 本次变更：见下方 [Changelog → v1.0.3](#v103--2026-06-18)。
 
@@ -35,23 +35,23 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 ## 🚀 安装
 
 ### DMG（推荐）
-1. 双击 `AstrbotLauncher-{VERSION}.dmg`
-2. 拖拽 `AstrbotLauncher.app` 到 `/Applications`
-3. 在 Launchpad 打开 "AstrBot Launcher"
+1. 双击 `AiServiceHub-{VERSION}.dmg`
+2. 拖拽 `AiServiceHub.app` 到 `/Applications`
+3. 在 Launchpad 打开 "AI Service Hub"
 4. 首次启动如遇 Gatekeeper 拦截，在"系统设置 → 隐私与安全性"点击"仍要打开"
 
 ### ZIP
-1. 解压 `AstrbotLauncher-{VERSION}-macOS.zip`
-2. 移动 `AstrbotLauncher.app` 到 `/Applications`
+1. 解压 `AiServiceHub-{VERSION}-macOS.zip`
+2. 移动 `AiServiceHub.app` 到 `/Applications`
 3. 启动 app
 
-> ⚠️ **从 v1.0.0 / v1.0.1 升级**：先删除 `/Applications` 中的旧版 `AstrbotLauncher.app`（避免旧 UserDefaults 残留导致崩溃）。
+> ⚠️ **从 v1.0.0 / v1.0.1 升级**：先删除 `/Applications` 中的旧版 `AiServiceHub.app`（避免旧 UserDefaults 残留导致崩溃）。
 
 ---
 
 ## 📋 首次使用
 
-1. 启动 AstrBot Launcher
+1. 启动 AI Service Hub
 2. 打开 ⚙️ 设置
 3. 在 "Docker 容器" 部分选择 NapCat / Shipyard 容器
 4. 设置 AstrBot WebUI 端口（默认 6185）
@@ -172,7 +172,7 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 ## 📮 反馈
 
-GitHub Issues：https://github.com/DuJunxi1993/AstrbotLauncher/issues
+GitHub Issues：https://github.com/DuJunxi1993/AiServiceHub/issues
 
 ---
 

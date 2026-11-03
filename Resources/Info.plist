@@ -5,19 +5,19 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>AstrBot Launcher</string>
+    <string>AI Service Hub</string>
     <key>CFBundleExecutable</key>
-    <string>AstrbotLauncher</string>
+    <string>AiServiceHub</string>
     <key>CFBundleIconFile</key>
-    <string>astrbot_launcher</string>
+    <string>ai_service_hub</string>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.djx.astrbotlauncher</string>
+    <string>com.djx.aiservicehub</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>AstrbotLauncher</string>
+    <string>AiServiceHub</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -35,6 +35,6 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>AstrBot Launcher 需要使用 Apple Events 以自动化操作。</string>
+    <string>AI Service Hub 需要使用 Apple Events 以自动化操作。</string>
 </dict>
 </plist>

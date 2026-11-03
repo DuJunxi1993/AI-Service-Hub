@@ -15,7 +15,7 @@ struct MainWindowView: View {
         } detail: {
             detailContent
         }
-        .navigationTitle("AstrBot Launcher")
+        .navigationTitle("AI Service Hub")
         .toolbar {
             // 启停切换（左侧）
             ToolbarItem(placement: .navigation) {

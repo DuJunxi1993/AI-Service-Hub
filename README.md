@@ -1,4 +1,4 @@
-# AstrBot Launcher
+# AI Service Hub
 
 一个 macOS 原生应用，用于集中启动、管理 AstrBot（通过 `uv` 部署）以及通过 `docker compose` 部署的 NapCat、Shipyard 等容器。
 <img width="927" height="651" alt="iShot_2026-06-22_13 15 48" src="https://github.com/user-attachments/assets/ca05290f-47c9-4f3f-acf7-eb84620f535c" />
@@ -30,7 +30,7 @@
 bash build.sh
 ```
 
-产物：`AstrbotLauncher.app`
+产物：`AiServiceHub.app`
 
 ## 运行开发版
 
@@ -41,14 +41,14 @@ bash run.sh
 ## 首次启动注意
 
 由于未进行 Apple Developer 签名，首次启动可能被 Gatekeeper 拦截。处理方法：
-- 在 Finder 中右键 `AstrbotLauncher.app` → 打开 → 在弹窗中再次点击"打开"
-- 或执行：`xattr -dr com.apple.quarantine AstrbotLauncher.app`
+- 在 Finder 中右键 `AiServiceHub.app` → 打开 → 在弹窗中再次点击"打开"
+- 或执行：`xattr -dr com.apple.quarantine AiServiceHub.app`
 
 ## 项目结构
 
 ```
-AstrbotLauncher/
-├── Sources/AstrbotLauncher/
+AiServiceHub/
+├── Sources/AiServiceHub/
 │   ├── App/                    入口
 │   ├── Models/                 数据模型
 │   ├── Managers/               业务管理
@@ -60,7 +60,7 @@ AstrbotLauncher/
 │   └── Utilities/              工具
 ├── Resources/
 │   ├── Info.plist
-│   └── astrbot_launcher.icns
+│   └── ai_service_hub.icns
 ├── Package.swift               SwiftPM 配置
 ├── build.sh                    打包脚本
 └── run.sh                      开发运行脚本
