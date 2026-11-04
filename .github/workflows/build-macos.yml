@@ -68,8 +68,23 @@ jobs:
             release-checksums.txt
           if-no-files-found: error
 
-      - name: Create Release
+      - name: Check release exists
+        id: release
         if: startsWith(github.ref, 'refs/tags/macos-v')
+        run: |
+          # 发布由本地 `gh release create` 负责（带人工撰写的说明和校验和）。
+          # 这里只在 release 尚不存在时才创建，避免 CI 用自己的构建覆盖已发布的产物。
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "release $GITHUB_REF_NAME 已存在，跳过创建"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/macos-v') && steps.release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
