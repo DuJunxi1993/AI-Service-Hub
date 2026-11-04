@@ -15,7 +15,7 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
 | `AiServiceHub-2.0.1.dmg` | 1.5 MB | `4e74b5f3a4b70e852e56a530e74c49bc8f0879f62d00046b323ee071f6874d6a` |
-| `AiServiceHub-2.0.1-macOS.zip` | 1.1 MB | `31fc7c00d6444b757a2bb5efc0a56ecc9aa2b92196a76b98da008e533410d420` |
+| `AiServiceHub-2.0.1-macOS.zip` | 1.1 MB | `30847f64a2c9de7ddec07e283a9cef04feaab65765cafaf01c7c7fa6ad870a0e` |
 
 下载：[GitHub Releases · macos-v2.0.1](https://github.com/DuJunxi1993/AstrbotLauncher/releases/tag/macos-v2.0.1)
 

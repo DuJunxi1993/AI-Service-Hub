@@ -83,6 +83,13 @@ other platforms; do not push macOS-only changes elsewhere.
   alone — macOS recycles PIDs and killing the wrong process is unrecoverable.
 - **Liquid Glass calls are macOS 26 only** (`glassEffect`, `glassProminent`).
   Keep them in the view layer; `AiServiceHubCore` must stay UI-free.
+- **Package the zip with `ditto -c -k --keepParent --norsrc --noextattr`.**
+  Without `--norsrc --noextattr`, `ditto` stores extended attributes as
+  AppleDouble `._*` sidecars inside the zip. Those extra files land in
+  code-signature-sealed directories, so an extracted copy fails
+  `codesign --verify` with *"a sealed resource is missing or invalid"*.
+  The CI workflow verifies this explicitly after packaging. (`COPYFILE_DISABLE=1`
+  does **not** help — it still emits the `._` files.)
 - **No customizable toolbar.** `MainWindowView` uses a plain `.toolbar { }` with
   fixed items. Do **not** add `.toolbar(id:)` or `customizationBehavior()` — it
   crashes on macOS 26.5.1. `AiServiceHubApp.init()` scrubs stale
