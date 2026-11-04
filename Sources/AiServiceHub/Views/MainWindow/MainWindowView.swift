@@ -12,32 +12,13 @@ struct MainWindowView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+                .navigationSplitViewColumnWidth(min: 170, ideal: 230, max: 340)
         } detail: {
             detailContent
         }
         .navigationTitle("AI Service Hub")
         .toolbar {
-            // 启停切换（左侧）
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    Task {
-                        if appModel.runningCount > 0 {
-                            await appModel.stopAll()
-                        } else {
-                            await appModel.startAll()
-                        }
-                    }
-                } label: {
-                    Label(
-                        appModel.runningCount > 0 ? "停止" : "启动",
-                        systemImage: appModel.runningCount > 0 ? "stop.fill" : "play.fill"
-                    )
-                    .foregroundStyle(appModel.runningCount > 0 ? Theme.stopColor : Theme.startColor)
-                }
-                .help(appModel.runningCount > 0 ? "停止全部服务" : "启动全部服务")
-                .disabled(isTransitioning)
-            }
+            // 全部集中在顶栏最右侧，顺序：刷新 → WebUI → 数据目录 → 设置 → 启停
 
             // 刷新
             ToolbarItem(placement: .primaryAction) {
@@ -64,17 +45,21 @@ struct MainWindowView: View {
                 .disabled(currentSelection == nil || appModel.snapshots[currentSelection ?? UUID()]?.webURL == nil)
             }
 
-            // 数据目录
+            // 数据目录（当前选中服务的实际数据目录）
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    openDataDirectory()
+                    if let id = currentSelection {
+                        appModel.openDataDirectory(of: id)
+                    } else {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()))
+                    }
                 } label: {
                     Label("数据目录", systemImage: "folder")
                 }
-                .help("在 Finder 中打开数据目录")
+                .help(currentDataDirectoryHint)
             }
 
-            // 设置（最右侧）
+            // 设置
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showSettings = true
@@ -82,6 +67,27 @@ struct MainWindowView: View {
                     Label("设置", systemImage: "gearshape.fill")
                 }
                 .help("打开设置")
+            }
+
+            // 启停切换（最右侧）
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task {
+                        if appModel.runningCount > 0 {
+                            await appModel.stopAll()
+                        } else {
+                            await appModel.startAll()
+                        }
+                    }
+                } label: {
+                    Label(
+                        appModel.runningCount > 0 ? "停止" : "启动",
+                        systemImage: appModel.runningCount > 0 ? "stop.fill" : "play.fill"
+                    )
+                    .foregroundStyle(appModel.runningCount > 0 ? Theme.stopColor : Theme.startColor)
+                }
+                .help(appModel.runningCount > 0 ? "停止全部服务" : "启动全部服务")
+                .disabled(isTransitioning)
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -120,17 +126,15 @@ struct MainWindowView: View {
         }
     }
 
-    /// 打开 AstrBot 的数据目录（没有 AstrBot 服务时退回主目录）
-    private func openDataDirectory() {
-        let path: String
-        if let astrBot = settings.service(named: "AstrBot"),
-           case .process(let spec) = astrBot.managed,
-           let workingDirectory = spec.workingDirectory {
-            path = workingDirectory
-        } else {
-            path = NSHomeDirectory()
+    /// 数据目录按钮的提示文字
+    private var currentDataDirectoryHint: String {
+        guard let id = currentSelection, let descriptor = settings.service(id: id) else {
+            return "在 Finder 中打开主目录"
         }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        if let directory = descriptor.dataDirectory {
+            return "在 Finder 中打开 \(directory)"
+        }
+        return "在 Finder 中打开主目录"
     }
 }
 

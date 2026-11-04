@@ -39,11 +39,10 @@ struct AiServiceHubApp: App {
             MainWindowView(showSettings: $showSettings)
                 .environmentObject(appModel)
                 .environmentObject(settings)
-                .frame(minWidth: 760, idealWidth: 900, minHeight: 500, idealHeight: 620)
+                .frame(minWidth: 820, idealWidth: 960, minHeight: 500, idealHeight: 620)
                 .preferredColorScheme(settings.themeMode.colorScheme)
         }
         .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appSettings) {

@@ -80,6 +80,62 @@ public struct ProcessDriver: Sendable {
         ProcessInspector.reap(pid: record.pid)
     }
 
+    /// 终止所有匹配指定模式的进程
+    ///
+    /// 给**纯监控**服务用：它们没有驱动、没有所有权，
+    /// 但用户可能想一键停掉（例如 Hermes 网关、DSH Web）。
+    ///
+    /// 安全性：
+    /// - 只匹配该服务自己声明的进程模式
+    /// - 跳过本进程及其父进程（避免自杀）
+    /// - SIGTERM → 等待 → SIGKILL，与 `stop(record:)` 同一套节奏
+    ///
+    /// - Returns: 实际终止掉的 pid
+    @discardableResult
+    public func terminateAll(matching patterns: [String]) async -> [pid_t] {
+        guard !patterns.isEmpty else { return [] }
+
+        let processes = await inspector.allProcesses(matching: patterns)
+        guard !processes.isEmpty else { return [] }
+
+        let selfPID = getpid()
+        let parentPID = getppid()
+        var terminated: [pid_t] = []
+
+        for process in processes {
+            guard process.pid != selfPID, process.pid != parentPID else { continue }
+            guard ProcessInspector.isAlive(pid: process.pid) else { continue }
+
+            kill(process.pid, SIGTERM)
+
+            var elapsed: TimeInterval = 0
+            while elapsed < 3 {
+                if !ProcessInspector.isAlive(pid: process.pid) {
+                    ProcessInspector.reap(pid: process.pid)
+                    terminated.append(process.pid)
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                elapsed += 0.1
+            }
+
+            if ProcessInspector.isAlive(pid: process.pid) {
+                AppLog.warn("进程 \(process.pid) 未响应 SIGTERM，发送 SIGKILL")
+                kill(process.pid, SIGKILL)
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if !ProcessInspector.isAlive(pid: process.pid) {
+                    terminated.append(process.pid)
+                }
+            }
+            ProcessInspector.reap(pid: process.pid)
+        }
+
+        if !terminated.isEmpty {
+            AppLog.info("已终止 \(terminated.count) 个进程：\(terminated.map(String.init).joined(separator: ", "))")
+        }
+        return terminated
+    }
+
     /// 探测进程状态
     public func status(spec: ProcessSpec, record: OwnedProcessRecord?) async -> ProcessStatus {
         // 1. 本程序持有的进程：直接用 pid + 启动时间校验

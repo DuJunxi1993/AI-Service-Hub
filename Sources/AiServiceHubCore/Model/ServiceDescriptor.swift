@@ -26,6 +26,14 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
     public var openURL: URL?
     /// 备注
     public var note: String?
+    /// 该服务的数据目录（「打开数据目录」按钮的目标）
+    public var dataDirectory: String?
+    /// 「停止全部进程」用的进程匹配模式
+    ///
+    /// 与 `probes` 里的探测模式分开：探测要**精确**（PID 决定了端口反查的对象），
+    /// 而「停止全部」要**全面**（Hermes 的进程散落在 supervisor / python / 桌面端各处，
+    /// 只按探测模式匹配会漏掉一大半）。
+    public var stopProcessPatterns: [String]?
     /// 若该服务来自内置预设，记录预设标识（用于避免重复安装与支持「恢复预设」）
     public var presetIdentifier: String?
 
@@ -41,6 +49,8 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         logSources: [LogSourceSpec] = [],
         openURL: URL? = nil,
         note: String? = nil,
+        dataDirectory: String? = nil,
+        stopProcessPatterns: [String]? = nil,
         presetIdentifier: String? = nil
     ) {
         self.id = id
@@ -54,6 +64,8 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         self.logSources = logSources
         self.openURL = openURL
         self.note = note
+        self.dataDirectory = dataDirectory
+        self.stopProcessPatterns = stopProcessPatterns
         self.presetIdentifier = presetIdentifier
     }
 
@@ -66,5 +78,22 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
     /// 是否参与「启动时自动拉起」
     public var participatesInAutoStart: Bool {
         lifecycle == .managed && enabled && autoStart
+    }
+
+    /// 该服务相关的进程匹配模式（来自探测配置）
+    ///
+    /// 用于「停止全部相关进程」——纯监控服务没有驱动，
+    /// 但用户仍可能想一键停掉它（例如 Hermes 网关）。
+    public var processPatterns: [String] {
+        probes.compactMap { probe in
+            if case .processPattern(let pattern) = probe { return pattern }
+            return nil
+        }
+    }
+
+    /// 「停止全部进程」实际使用的模式
+    public var effectiveStopPatterns: [String] {
+        let explicit = stopProcessPatterns ?? []
+        return explicit.isEmpty ? processPatterns : explicit
     }
 }

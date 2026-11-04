@@ -38,6 +38,12 @@ final class AppModel: ObservableObject {
     /// 过渡态开始时间（用于判断启动/停止是否超时）
     private var transitionStartedAt: [UUID: Date] = [:]
 
+    /// 最近一次枚举的进程表
+    ///
+    /// 每轮刷新只 `ps` 一次（这台机器有 ~800 个进程），复用给所有探测，
+    /// 「停止全部进程」的确认对话框也用它来数匹配到的进程。
+    private var processTableCache = ProcessTable(entries: [])
+
     init(settings: AppSettings = .shared) {
         self.settings = settings
         self.hub = LogHub()
@@ -99,6 +105,7 @@ final class AppModel: ObservableObject {
         await refreshContainers()
         // 每轮只枚举一次进程表，供所有探测复用
         let processTable = await ProcessInspector().snapshot()
+        processTableCache = processTable
         for descriptor in settings.orderedServices {
             await refresh(descriptor, processTable: processTable)
         }
@@ -351,6 +358,62 @@ final class AppModel: ObservableObject {
         } catch {
             fail(id, message: error.localizedDescription)
             NotificationManager.shared.send(title: "停止失败", body: "\(descriptor.name)：\(error.localizedDescription)")
+        }
+    }
+
+    /// 停止服务关联的全部进程（给纯监控服务用）
+    ///
+    /// 纯监控服务没有驱动、没有进程所有权，常规的「停止」按钮不适用。
+    /// 但用户可能想一键停掉它 —— 例如 Hermes 网关、DSH Web。
+    /// 这里按服务自己声明的进程匹配模式终止对应进程。
+    func stopAllProcesses(of id: UUID) async {
+        guard let descriptor = settings.service(id: id) else { return }
+        // 用「停止专用」模式：比探测模式全面（Hermes 的进程散落在多处）
+        let patterns = descriptor.effectiveStopPatterns
+        guard !patterns.isEmpty else {
+            errorMessage = "\(descriptor.name) 没有配置进程匹配规则，无法停止"
+            return
+        }
+
+        setStatus(id, .stopping)
+        let terminated = await processDriver.terminateAll(matching: patterns)
+        await refreshAllNow()
+
+        if terminated.isEmpty {
+            AppLog.info("\(descriptor.name)：没有找到运行中的相关进程")
+        } else {
+            NotificationManager.shared.send(
+                title: "服务已停止",
+                body: "\(descriptor.name)：已终止 \(terminated.count) 个进程"
+            )
+        }
+    }
+
+    /// 当前匹配该服务停止规则的进程数量（用于确认对话框）
+    func matchingProcessCount(for id: UUID) -> Int {
+        guard let descriptor = settings.service(id: id) else { return 0 }
+        let patterns = descriptor.effectiveStopPatterns
+        guard !patterns.isEmpty else { return 0 }
+        return processTableCache.matching(patterns).count
+    }
+
+    /// 打开服务的数据目录
+    ///
+    /// 优先用服务自己声明的数据目录；没有就退回主目录。
+    func openDataDirectory(of id: UUID) {
+        guard let descriptor = settings.service(id: id) else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()))
+            return
+        }
+        let path = descriptor.dataDirectory?.isEmpty == false
+            ? descriptor.dataDirectory!
+            : NSHomeDirectory()
+        let url = URL(fileURLWithPath: path)
+        // 目录不存在时退回报打开，避免静默失败
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
         }
     }
 

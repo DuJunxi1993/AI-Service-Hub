@@ -35,6 +35,10 @@ public enum HermesPreset {
             ],
             openURL: nil,
             note: "消息网关与 Agent 运行时（只读监控）",
+            dataDirectory: home,
+            // Hermes 的进程散落在多处：supervisor 脚本、两个 python 进程、桌面端 App。
+            // 全部都位于 ~/.hermes 之下，所以用 home 覆盖最全。
+            stopProcessPatterns: [home, "hermes gateway run"],
             presetIdentifier: identifier
         )
     }

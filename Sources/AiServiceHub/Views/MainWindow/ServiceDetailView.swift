@@ -12,46 +12,92 @@ struct ServiceDetailView: View {
     @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
     @State private var isLogExpanded: Bool = false
+    /// 「停止全部进程」的二次确认
+    @State private var showsStopAllConfirmation: Bool = false
 
     private var snapshot: ServiceSnapshot {
         appModel.snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
     }
 
+    /// 详情区窄于此宽度时，日志改为横向铺满（否则两个面板会互相挤掉）
+    private static let horizontalLogThreshold: CGFloat = 560
+
     var body: some View {
-        VStack(spacing: 0) {
-            headerCard
+        GeometryReader { geometry in
+            let stackVertically = isLogExpanded || geometry.size.width < Self.horizontalLogThreshold
 
-            Divider()
-                .opacity(0.2)
-                .padding(.vertical, 8)
+            VStack(spacing: 0) {
+                headerCard
 
-            if isLogExpanded {
-                // 横向展开：日志铺满整个下半部分
-                InlineLogView(
-                    descriptor: descriptor,
-                    isExpanded: true,
-                    onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = false } }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // 常规：左信息 / 右竖直日志
-                HSplitView {
-                    infoPane
-                        .frame(minWidth: 340, idealWidth: 460, maxWidth: .infinity)
+                Divider()
+                    .opacity(0.2)
+                    .padding(.vertical, 8)
 
-                    logPane
-                        .frame(minWidth: 300, idealWidth: 420, maxWidth: 720)
+                if stackVertically {
+                    // 横向：信息在上，日志铺满整个下半部分
+                    VStack(spacing: 0) {
+                        infoPane
+                            .frame(maxHeight: .infinity)
+
+                        Divider()
+                            .opacity(0.2)
+
+                        InlineLogView(
+                            descriptor: descriptor,
+                            isExpanded: true,
+                            onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = false } }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    // 常规：左信息 / 右竖直日志
+                    //
+                    // 宽度预算：窗口最小 820 − 侧栏最小 170 = 650 给详情区，
+                    // 两个子面板的最小宽度之和（260 + 220 = 480）必须小于它，
+                    // 否则内容会被裁掉。
+                    HSplitView {
+                        infoPane
+                            .frame(minWidth: 260, idealWidth: 440, maxWidth: .infinity)
+
+                        logPane
+                            .frame(minWidth: 220, idealWidth: 400, maxWidth: 720)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+                    .opacity(0.2)
+
+                StatusBarView()
             }
-
-            Divider()
-                .opacity(0.2)
-
-            StatusBarView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
+        .confirmationDialog(
+            "停止 \(descriptor.name) 的全部进程？",
+            isPresented: $showsStopAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("终止全部进程", role: .destructive) {
+                Task { await appModel.stopAllProcesses(of: descriptor.id) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(stopAllWarning)
+        }
+    }
+
+    /// 终止前的说明
+    private var stopAllWarning: String {
+        let patterns = descriptor.effectiveStopPatterns
+        let matched = appModel.matchingProcessCount(for: descriptor.id)
+        var text = "将终止匹配以下规则的进程：\n\(patterns.joined(separator: "\n"))"
+        text += "\n\n当前匹配到 \(matched) 个进程。此操作不可撤销。"
+        if descriptor.presetIdentifier == DSHPreset.identifier {
+            text += "\n\n注意：DSH 的 Web 控制台进程也在其中，停止后本程序会失去与它的连接。"
+        }
+        return text
     }
 
     /// 左栏：元数据 + 探测结果 + 操作按钮
@@ -288,8 +334,9 @@ struct ServiceDetailView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Spacer()
+        HStack(spacing: 10) {
+            // 左侧留白，按钮靠右排布
+            Spacer(minLength: 0)
 
             if descriptor.lifecycle == .managed {
                 Button {
@@ -301,6 +348,7 @@ struct ServiceDetailView: View {
                 .tint(Theme.startColor)
                 .disabled(!snapshot.status.canStart)
                 .controlSize(.large)
+                .fixedSize()
 
                 Button(role: .destructive) {
                     Task { await appModel.stop(descriptor.id) }
@@ -311,6 +359,7 @@ struct ServiceDetailView: View {
                 .tint(Theme.stopColor)
                 .disabled(!snapshot.status.canStop)
                 .controlSize(.large)
+                .fixedSize()
 
                 Button {
                     Task { await appModel.restart(descriptor.id) }
@@ -320,6 +369,21 @@ struct ServiceDetailView: View {
                 .buttonStyle(.glass)
                 .disabled(snapshot.status == .stopped || snapshot.status == .unknown)
                 .controlSize(.large)
+                .fixedSize()
+            } else {
+                // 纯监控服务：没有驱动，但用户仍可能想一键停掉它
+                Button(role: .destructive) {
+                    showsStopAllConfirmation = true
+                } label: {
+                    Label("停止全部进程", systemImage: "xmark.octagon.fill")
+                }
+                .buttonStyle(.glass)
+                .disabled(descriptor.effectiveStopPatterns.isEmpty || snapshot.status == .stopped)
+                .controlSize(.large)
+                .fixedSize()
+                .help(descriptor.effectiveStopPatterns.isEmpty
+                      ? "该服务没有配置进程匹配规则"
+                      : "终止匹配该服务进程规则的全部进程（\(descriptor.effectiveStopPatterns.count) 条规则）")
             }
 
             Button {
@@ -330,9 +394,20 @@ struct ServiceDetailView: View {
             .buttonStyle(.glassProminent)
             .disabled(snapshot.webURL == nil)
             .controlSize(.large)
+            .fixedSize()
             .help(snapshot.webURL?.absoluteString ?? webUIUnavailableHint)
 
-            Spacer()
+            if let dataDirectory = descriptor.dataDirectory {
+                Button {
+                    appModel.openDataDirectory(of: descriptor.id)
+                } label: {
+                    Label("数据目录", systemImage: "folder")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                .fixedSize()
+                .help("在 Finder 中打开 \(dataDirectory)")
+            }
         }
         .padding(.top, 8)
     }

@@ -82,8 +82,9 @@ final class AppSettings: ObservableObject {
             )
         }
 
-        // 升级旧配置（容器日志源、webUIKind 等）
+        // 升级旧配置（容器日志源、webUIKind、数据目录、已下线预设等）
         initial.upgradeLogSources()
+        initial.upgradeServices()
         config = initial
 
         let preferences = initial.preferences

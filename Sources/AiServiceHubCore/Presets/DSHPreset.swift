@@ -36,6 +36,9 @@ public enum DSHPreset {
             ],
             openURL: URL(string: "http://127.0.0.1:\(port)"),
             note: "DeepSeek Harness Web 控制台（只读监控）",
+            dataDirectory: home,
+            // dsh web 是 Web 控制台本体，DSHShell 是原生外壳
+            stopProcessPatterns: ["dsh web", "DSHShell"],
             presetIdentifier: identifier
         )
     }

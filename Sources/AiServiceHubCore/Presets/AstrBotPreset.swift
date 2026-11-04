@@ -73,6 +73,7 @@ public enum AstrBotPreset {
             ],
             openURL: URL(string: "http://localhost:\(webPort)"),
             note: "AI 机器人框架",
+            dataDirectory: dataDirectory,
             presetIdentifier: identifier
         )
     }

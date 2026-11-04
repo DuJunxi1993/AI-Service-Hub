@@ -166,6 +166,64 @@ public struct AppConfig: Codable, Sendable, Equatable {
         }
     }
 
+    /// 升级旧配置中的服务列表
+    ///
+    /// - 移除已下线内置预设的服务（Shipyard）
+    /// - 补齐缺失的 `dataDirectory`，否则「打开数据目录」会退回主目录
+    public mutating func upgradeServices() {
+        // Shipyard 已从内置预设中移除
+        let before = services.count
+        services.removeAll { $0.name.caseInsensitiveCompare("Shipyard") == .orderedSame }
+        if services.count != before {
+            AppLog.info("已移除 \(before - services.count) 个已下线预设的服务（Shipyard）")
+        }
+
+        // 补齐数据目录
+        for index in services.indices where services[index].dataDirectory == nil {
+            services[index].dataDirectory = Self.inferDataDirectory(for: services[index])
+        }
+
+        // 补齐「停止全部进程」的匹配模式
+        for index in services.indices where services[index].stopProcessPatterns == nil {
+            services[index].stopProcessPatterns = Self.inferStopPatterns(for: services[index])
+        }
+    }
+
+    /// 推断「停止全部进程」用的模式
+    ///
+    /// 旧配置里没有这个字段，按预设补齐：探测模式要精确（PID 决定端口反查对象），
+    /// 而停止模式要全面 —— Hermes 的进程散落在 supervisor / python / 桌面端各处。
+    private static func inferStopPatterns(for descriptor: ServiceDescriptor) -> [String]? {
+        switch descriptor.presetIdentifier {
+        case HermesPreset.identifier:
+            return [HermesPreset.defaultHome(), "hermes gateway run"]
+        case DSHPreset.identifier:
+            return ["dsh web", "DSHShell"]
+        default:
+            return nil
+        }
+    }
+
+    /// 推断服务的数据目录
+    ///
+    /// 按已知的内置预设判断；判断不出来就返回 nil（「打开数据目录」会退回主目录）。
+    private static func inferDataDirectory(for descriptor: ServiceDescriptor) -> String? {
+        switch descriptor.presetIdentifier {
+        case AstrBotPreset.identifier:
+            return "\(NSHomeDirectory())/data"
+        case HermesPreset.identifier:
+            return HermesPreset.defaultHome()
+        case DSHPreset.identifier:
+            return DSHPreset.defaultHome()
+        default:
+            // 可管理进程：它的数据目录通常在工作目录里
+            if case .process(let spec) = descriptor.managed, let workingDirectory = spec.workingDirectory {
+                return workingDirectory
+            }
+            return nil
+        }
+    }
+
     /// 按 id 查找服务
     public func service(id: UUID) -> ServiceDescriptor? {
         services.first { $0.id == id }

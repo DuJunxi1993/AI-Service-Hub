@@ -42,7 +42,6 @@ public enum LegacyMigration {
         let defaults = defaults ?? legacyDefaults()
         return defaults.object(forKey: Key.astrBotLaunchMode) != nil
             || defaults.object(forKey: Key.napcatContainer) != nil
-            || defaults.object(forKey: Key.shipyardContainer) != nil
             || defaults.object(forKey: Key.dataDirectory) != nil
     }
 
@@ -58,10 +57,10 @@ public enum LegacyMigration {
         services.append(astrBot)
         legacyNameToID["astrbot"] = astrBot.id
 
-        // 2. 旧版为 NapCat / Shipyard 存过容器名 —— 转成「委托容器」服务
+        // 2. 旧版为 NapCat 存过容器名 —— 转成「委托容器」服务
+        //    （Shipyard 已从内置预设中移除，不再迁移）
         for (legacyKey, legacyName, displayName, accent) in [
-            (Key.napcatContainer, "napcat", "NapCat", RGBAColor.cyan),
-            (Key.shipyardContainer, "shipyard", "Shipyard", RGBAColor.purple)
+            (Key.napcatContainer, "napcat", "NapCat", RGBAColor.cyan)
         ] {
             let containerName = (defaults.string(forKey: legacyKey) ?? "").trimmingCharacters(in: .whitespaces)
             guard !containerName.isEmpty else { continue }

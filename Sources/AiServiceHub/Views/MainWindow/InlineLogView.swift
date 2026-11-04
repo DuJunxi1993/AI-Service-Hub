@@ -20,6 +20,8 @@ struct InlineLogView: View {
     @State private var allLines: [LogLine] = []
     @State private var cachedLines: [LogLine] = []
     @State private var isPaused: Bool = false
+    /// 是否自动跟随到最新一行
+    @State private var followsTail: Bool = true
     @State private var streamTask: Task<Void, Never>?
 
     private static let bufferLimit = 2000
@@ -36,14 +38,11 @@ struct InlineLogView: View {
             Divider().opacity(0.2)
             content
         }
-        .background(
-            RoundedRectangle(cornerRadius: isExpanded ? 0 : 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: isExpanded ? 0 : 12))
-        )
+        // 面板本身不再用 Liquid Glass —— 底部那层玻璃装饰会盖住日志内容。
+        // 玻璃效果只保留在按钮上（搜索框、暂停、复制、清空、展开）。
         .padding(.horizontal, isExpanded ? 0 : 12)
-        .padding(.bottom, isExpanded ? 0 : 8)
-        .padding(.top, isExpanded ? 6 : 8)
+        .padding(.bottom, isExpanded ? 0 : 4)
+        .padding(.top, isExpanded ? 6 : 4)
         .onAppear { subscribe() }
         .onDisappear { cancelSubscription() }
         .onChange(of: descriptor.id) { _, _ in
@@ -132,6 +131,21 @@ struct InlineLogView: View {
                 .controlSize(.small)
                 .help("清空此服务的日志（不影响其他服务）")
 
+                // 跟随最新 / 停在当前位置
+                Button {
+                    followsTail.toggle()
+                    if followsTail {
+                        // 重新开启时立刻回到最新一行
+                        followsTail = true
+                    }
+                } label: {
+                    Image(systemName: followsTail ? "arrow.down.to.line" : "arrow.down.to.line.circle")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help(followsTail ? "正在跟随最新日志（点击停在当前位置）" : "已停在当前位置（点击恢复跟随最新）")
+
                 // 展开：竖直面板 <-> 横向铺满
                 Button {
                     onToggleExpanded()
@@ -167,12 +181,23 @@ struct InlineLogView: View {
                 }
                 .padding(.vertical, 4)
             }
-            .onChange(of: cachedLines.count) { _, _ in
-                if !isPaused, let last = cachedLines.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
+            // 跟随最新：监听**最后一行**而不是行数 ——
+            // 缓冲区满了（2000 行）之后行数不再变化，
+            // 监听 count 就再也收不到通知了，日志会停在原地不跟随。
+            .onChange(of: cachedLines.last?.id) { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onAppear {
+                scrollToBottom(proxy)
             }
         }
+    }
+
+    /// 滚动到底部
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        guard followsTail, !isPaused else { return }
+        guard let last = cachedLines.last else { return }
+        proxy.scrollTo(last.id, anchor: .bottom)
     }
 
     // MARK: - 订阅
