@@ -46,7 +46,7 @@ public struct ProbeEvaluator: Sendable {
             groups.append(DetailGroup(
                 title: "同名进程",
                 rows: processes.map {
-                    DetailRow(label: "PID \($0.pid)", value: $0.command)
+                    DetailRow(label: "PID \($0.pid)", value: Self.displayCommand($0.command))
                 }
             ))
         }
@@ -56,6 +56,21 @@ public struct ProbeEvaluator: Sendable {
             summary: "运行中 (PID \(first.pid))",
             groups: groups
         )
+    }
+
+    /// 命令行的展示形式
+    ///
+    /// 命令行里可能内嵌大段脚本 —— Hermes 的 osascript 包装器就是这样，
+    /// 里面是几百行 Python 代码。不处理的话详情页会被它撑爆。
+    /// 压成单行并截断，完整内容用 `ps` 看。
+    static func displayCommand(_ command: String, limit: Int = 160) -> String {
+        let flattened = command
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard flattened.count > limit else { return flattened }
+        return String(flattened.prefix(limit)) + "…"
     }
 
     private func evaluatePort(_ port: Int) async -> ProbeResult {

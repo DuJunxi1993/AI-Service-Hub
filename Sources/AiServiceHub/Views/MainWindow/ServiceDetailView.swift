@@ -102,22 +102,29 @@ struct ServiceDetailView: View {
 
     /// 左栏：元数据 + 探测结果 + 操作按钮
     private var infoPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                metadataRows
+        GeometryReader { geometry in
+            let narrow = geometry.size.width < 400
 
-                if !snapshot.probeResults.isEmpty {
-                    Divider().opacity(0.3)
-                    probeSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    metadataRows
+
+                    if !snapshot.probeResults.isEmpty {
+                        Divider().opacity(0.3)
+                        probeSection
+                    }
+
+                    actionButtons
+
+                    if snapshot.webURL == nil, descriptor.lifecycle == .managed {
+                        webUIPendingHint
+                    }
                 }
-
-                actionButtons
-
-                if snapshot.webURL == nil, descriptor.lifecycle == .managed {
-                    webUIPendingHint
-                }
+                .padding(20)
+                // 内容不能反过来撑大容器 —— 否则会溢出被裁
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
+            .environment(\.isNarrowLayout, narrow)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -334,10 +341,8 @@ struct ServiceDetailView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        HStack(spacing: 10) {
-            // 左侧留白，按钮靠右排布
-            Spacer(minLength: 0)
-
+        // 用流式布局：按钮放不下就换行，而不是把内容撑出容器被裁掉
+        FlowLayout(spacing: 10, lineSpacing: 10, alignment: .center) {
             if descriptor.lifecycle == .managed {
                 Button {
                     Task { await appModel.start(descriptor.id) }
@@ -409,6 +414,7 @@ struct ServiceDetailView: View {
                 .help("在 Finder 中打开 \(dataDirectory)")
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.top, 8)
     }
 }
@@ -416,6 +422,8 @@ struct ServiceDetailView: View {
 /// 探测结果卡片
 struct ProbeResultView: View {
     let result: ProbeResult
+
+    @Environment(\.isNarrowLayout) private var isNarrow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -437,20 +445,40 @@ struct ProbeResultView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.tertiary)
                     ForEach(group.rows) { row in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(row.label)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 110, alignment: .leading)
-                            Text(row.value)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(rowTint(row.state))
-                            if let note = row.note {
-                                Text(note)
+                        if isNarrow {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.label)
                                     .font(.system(size: 10))
                                     .foregroundStyle(.tertiary)
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(row.value)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(rowTint(row.state))
+                                        .lineLimit(3)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let note = row.note {
+                                        Text(note)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
                             }
-                            Spacer()
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(row.label)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 110, alignment: .leading)
+                                Text(row.value)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(rowTint(row.state))
+                                if let note = row.note {
+                                    Text(note)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer(minLength: 0)
+                            }
                         }
                     }
                 }
@@ -498,19 +526,38 @@ struct MetadataRow: View {
     let label: String
     let value: String
 
+    /// 窄面板：标签在上、值在下，值可以换行
+    @Environment(\.isNarrowLayout) private var isNarrow
+
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .frame(width: 90, alignment: .leading)
-            Text(value)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
+        if isNarrow {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text(value)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    // 最多 3 行 —— 再长就截断，避免一条超长内容把面板撑开
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 90, alignment: .leading)
+                Text(value)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
         }
     }
 }

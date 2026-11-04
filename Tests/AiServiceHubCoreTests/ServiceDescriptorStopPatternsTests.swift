@@ -140,3 +140,40 @@ final class ConfigUpgradeTests: XCTestCase {
         XCTAssertEqual(config.services[0].dataDirectory, "/custom/path")
     }
 }
+
+final class DisplayCommandTests: XCTestCase {
+    /// 命令行里内嵌大段脚本时要压成单行
+    func testNewlinesAreFlattened() {
+        let command = "line one\nline two\nline three"
+        let display = ProbeEvaluator.displayCommand(command)
+        XCTAssertFalse(display.contains("\n"))
+        XCTAssertTrue(display.contains("line one line two line three"))
+    }
+
+    /// 超长命令行要截断
+    func testLongCommandIsTruncated() {
+        let command = String(repeating: "x", count: 500)
+        let display = ProbeEvaluator.displayCommand(command, limit: 100)
+        XCTAssertEqual(display.count, 101)  // 100 + 省略号
+        XCTAssertTrue(display.hasSuffix("…"))
+    }
+
+    /// 短命令行原样保留
+    func testShortCommandIsUnchanged() {
+        XCTAssertEqual(ProbeEvaluator.displayCommand("/usr/bin/sleep 30"), "/usr/bin/sleep 30")
+    }
+
+    /// Hermes 的 osascript 包装器（含几百行 Python）不能撑爆详情页
+    func testHermesStyleWrapperIsBounded() {
+        let embedded = (0..<200).map { "line \($0) import os" }.joined(separator: "\n")
+        let command = "/usr/bin/osascript -l JavaScript -e '\(embedded)'"
+        let display = ProbeEvaluator.displayCommand(command)
+        XCTAssertLessThanOrEqual(display.count, 161)
+        XCTAssertFalse(display.contains("\n"))
+    }
+
+    /// 首尾空白要去掉
+    func testWhitespaceIsTrimmed() {
+        XCTAssertEqual(ProbeEvaluator.displayCommand("  hello  "), "hello")
+    }
+}
