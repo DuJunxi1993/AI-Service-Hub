@@ -87,6 +87,14 @@ other platforms; do not push macOS-only changes elsewhere.
   fixed items. Do **not** add `.toolbar(id:)` or `customizationBehavior()` — it
   crashes on macOS 26.5.1. `AiServiceHubApp.init()` scrubs stale
   `NSNavToolbarCustomization-*` / `NSToolbar Identifier *` keys; keep that.
+- **Never restore `.windowStyle(.hiddenTitleBar)`.** With it, SwiftUI renders the
+  toolbar as a content-hugging floating capsule and **ignores**
+  `ToolbarItem(placement:)` — every button ends up crammed at the left, and a
+  `Spacer()` inside the item collapses to zero. The real title bar makes
+  `.primaryAction` land on the window's trailing edge, which is what the toolbar
+  buttons need. The `.toolbar` modifier must also be attached to the **detail**
+  closure, not to `NavigationSplitView` — on the split view it lands in the
+  sidebar column's toolbar region.
 - **Do not combine `POSIX_SPAWN_SETSID` with `POSIX_SPAWN_SETPGROUP`** — it
   returns `EPERM` on macOS. `DaemonSpawner` uses SETSID only when `detached`.
 - **Observed services must never be started/stopped.** `AppModel.start/stop`

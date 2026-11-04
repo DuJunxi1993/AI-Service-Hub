@@ -42,7 +42,6 @@ struct AiServiceHubApp: App {
                 .frame(minWidth: 820, idealWidth: 960, minHeight: 500, idealHeight: 620)
                 .preferredColorScheme(settings.themeMode.colorScheme)
         }
-        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appSettings) {

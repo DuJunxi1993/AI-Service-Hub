@@ -15,81 +15,87 @@ struct MainWindowView: View {
                 .navigationSplitViewColumnWidth(min: 170, ideal: 230, max: 340)
         } detail: {
             detailContent
+                // 工具栏必须挂在 detail 上：挂在 NavigationSplitView 上会落到
+                // **侧栏那一侧**的工具栏区，按钮就贴在左边而不是最右侧。
+                .toolbar {
+                    // 顺序：刷新 → WebUI → 数据目录 → 设置 → 启停（最右侧）
+                    //
+                    // 注意：窗口**不能**用 `.windowStyle(.hiddenTitleBar)` ——
+                    // 那会让 SwiftUI 把工具栏渲染成贴合内容宽度的悬浮胶囊，
+                    // ToolbarItem 的 placement 被忽略，按钮会全贴在左边。
+                    // 换成真实标题栏后，`.primaryAction` 才落在窗口最右侧。
+
+                    // 刷新
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            Task { await appModel.refreshAll() }
+                        } label: {
+                            Label("刷新", systemImage: "arrow.clockwise")
+                        }
+                        .help("立即刷新所有服务状态")
+                    }
+
+                    // WebUI
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            if let id = currentSelection {
+                                appModel.openWebUI(id)
+                            }
+                        } label: {
+                            Label("WebUI", systemImage: "globe")
+                        }
+                        .help("打开当前服务的 WebUI")
+                        .disabled(currentSelection == nil
+                                  || appModel.snapshots[currentSelection ?? UUID()]?.webURL == nil)
+                    }
+
+                    // 数据目录（当前选中服务的实际数据目录）
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            if let id = currentSelection {
+                                appModel.openDataDirectory(of: id)
+                            } else {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()))
+                            }
+                        } label: {
+                            Label("数据目录", systemImage: "folder")
+                        }
+                        .help(currentDataDirectoryHint)
+                    }
+
+                    // 设置
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("设置", systemImage: "gearshape.fill")
+                        }
+                        .help("打开设置")
+                    }
+
+                    // 启停切换（最右侧）
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            Task {
+                                if appModel.runningCount > 0 {
+                                    await appModel.stopAll()
+                                } else {
+                                    await appModel.startAll()
+                                }
+                            }
+                        } label: {
+                            Label(
+                                appModel.runningCount > 0 ? "停止" : "启动",
+                                systemImage: appModel.runningCount > 0 ? "stop.fill" : "play.fill"
+                            )
+                            .foregroundStyle(appModel.runningCount > 0 ? Theme.stopColor : Theme.startColor)
+                        }
+                        .help(appModel.runningCount > 0 ? "停止全部服务" : "启动全部服务")
+                        .disabled(isTransitioning)
+                    }
+                }
         }
         .navigationTitle("AI Service Hub")
-        .toolbar {
-            // 全部集中在顶栏最右侧，顺序：刷新 → WebUI → 数据目录 → 设置 → 启停
-
-            // 刷新
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task {
-                        await appModel.refreshAll()
-                    }
-                } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
-                }
-                .help("立即刷新所有服务状态")
-            }
-
-            // WebUI
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    if let id = currentSelection {
-                        appModel.openWebUI(id)
-                    }
-                } label: {
-                    Label("WebUI", systemImage: "globe")
-                }
-                .help("打开当前服务的 WebUI")
-                .disabled(currentSelection == nil || appModel.snapshots[currentSelection ?? UUID()]?.webURL == nil)
-            }
-
-            // 数据目录（当前选中服务的实际数据目录）
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    if let id = currentSelection {
-                        appModel.openDataDirectory(of: id)
-                    } else {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()))
-                    }
-                } label: {
-                    Label("数据目录", systemImage: "folder")
-                }
-                .help(currentDataDirectoryHint)
-            }
-
-            // 设置
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showSettings = true
-                } label: {
-                    Label("设置", systemImage: "gearshape.fill")
-                }
-                .help("打开设置")
-            }
-
-            // 启停切换（最右侧）
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task {
-                        if appModel.runningCount > 0 {
-                            await appModel.stopAll()
-                        } else {
-                            await appModel.startAll()
-                        }
-                    }
-                } label: {
-                    Label(
-                        appModel.runningCount > 0 ? "停止" : "启动",
-                        systemImage: appModel.runningCount > 0 ? "stop.fill" : "play.fill"
-                    )
-                    .foregroundStyle(appModel.runningCount > 0 ? Theme.stopColor : Theme.startColor)
-                }
-                .help(appModel.runningCount > 0 ? "停止全部服务" : "启动全部服务")
-                .disabled(isTransitioning)
-            }
-        }
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
                 .environmentObject(settings)
