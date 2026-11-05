@@ -451,6 +451,43 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// 勾选「启动时自动拉起」时，把没在跑的服务**现在**就拉起来
+    ///
+    /// 自动拉起原本只在 app 启动时跑一次。于是用户在 app 运行期间勾选这个框，
+    /// 看上去毫无反应 —— 而服务可能刚好崩了正等着被拉起。
+    /// 勾选即生效：没在跑就现在启动。
+    func startIfStopped(_ id: UUID) async {
+        guard let descriptor = settings.service(id: id) else { return }
+        guard descriptor.lifecycle == .managed else { return }
+        // 已经在跑 / 正在切换就不要动
+        let status = snapshots[id]?.status ?? .unknown
+        guard status != .running, !status.isTransitional else { return }
+
+        AppLog.info("勾选了自动拉起，拉起未运行的服务：\(descriptor.name)")
+        await start(id)
+    }
+
+    /// 打开总开关时，拉起所有勾选了自动拉起且当前未运行的服务
+    func startAutoStartServices() async {
+        let targets = settings.autoStartServices
+        guard !targets.isEmpty else { return }
+        // 先刷新一次拿到准确状态，避免对着已经停掉的服务重复拉起
+        await refreshAllNow()
+        var started: [String] = []
+        for descriptor in targets {
+            let status = snapshots[descriptor.id]?.status ?? .unknown
+            guard status != .running, !status.isTransitional else { continue }
+            await start(descriptor.id)
+            started.append(descriptor.name)
+        }
+        guard !started.isEmpty else { return }
+        AppLog.info("打开总开关，拉起：\(started.joined(separator: ", "))")
+        NotificationManager.shared.send(
+            title: "服务已拉起",
+            body: started.joined(separator: "、")
+        )
+    }
+
     // MARK: - WebUI
 
     /// 打开服务的 WebUI

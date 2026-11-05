@@ -80,6 +80,15 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         lifecycle == .managed && enabled && autoStart
     }
 
+    /// 从 `old` 变到 `self` 时，要不要**立刻**把服务拉起来
+    ///
+    /// 「启动时自动拉起」原本只在 app 启动时跑一次。用户�� app 运行期间勾选这个框，
+    /// 看上去毫无反应 —— 而服务可能刚好崩了正等着被拉起。
+    /// 所以勾选即生效：可管理的服务被新勾上时，现在就启动它。
+    public func shouldStartImmediately(comparedTo old: ServiceDescriptor) -> Bool {
+        autoStart && !old.autoStart && lifecycle == .managed
+    }
+
     /// 该服务相关的进程匹配模式（来自探测配置）
     ///
     /// 用于「停止全部相关进程」——纯监控服务没有驱动，

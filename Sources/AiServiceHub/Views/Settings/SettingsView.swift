@@ -192,7 +192,16 @@ struct SettingsSheet: View {
                 SettingsToggleRow(
                     title: "启动时自动拉起服务",
                     description: "总开关；具体拉起哪些服务在下方逐项勾选",
-                    isOn: $settings.autoStartAllServices
+                    isOn: Binding(
+                        get: { settings.autoStartAllServices },
+                        set: { newValue in
+                            settings.autoStartAllServices = newValue
+                            // 打开总开关就把勾选了的、当前没在跑的服务拉起来
+                            if newValue {
+                                Task { await appModel.startAutoStartServices() }
+                            }
+                        }
+                    )
                 )
 
                 Divider().opacity(0.3)
@@ -206,7 +215,13 @@ struct SettingsSheet: View {
                                 var updated = descriptor
                                 updated.autoStart = newValue
                                 settings.update(updated)
+                                // 勾选即生效：自动拉起只在 app 启动时跑一次，
+                                // 在运行中勾选却什么都不发生会让人以为坏了
+                                if updated.shouldStartImmediately(comparedTo: descriptor) {
+                                    Task { await appModel.startIfStopped(updated.id) }
+                                }
                             },
+                            status: appModel.snapshots[descriptor.id]?.status,
                             onEdit: { editingService = descriptor },
                             onRemove: { showRemoveConfirm = descriptor }
                         )
@@ -287,6 +302,8 @@ struct ServiceManagementRow: View {
     let descriptor: ServiceDescriptor
     @Binding var autoStartEnabled: Bool
     let onToggleAutoStart: (Bool) -> Void
+    /// 当前状态（用于显示服务是不是真的跑着）
+    var status: ServiceStatus? = nil
     let onEdit: () -> Void
     let onRemove: () -> Void
 
@@ -314,6 +331,18 @@ struct ServiceManagementRow: View {
                             .lineLimit(1)
                     }
                 }
+
+                // 运行状态 —— 勾选「自动拉起」后一眼能看出有没有真的跑起来
+                if let status, descriptor.lifecycle == .managed {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(status.color)
+                            .frame(width: 5, height: 5)
+                        Text(status.displayName)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Spacer(minLength: 8)
@@ -326,7 +355,9 @@ struct ServiceManagementRow: View {
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
                 .disabled(!autoStartEnabled)
-                .help(autoStartEnabled ? "启动本程序时自动拉起这个服务" : "总开关已关闭")
+                .help(autoStartEnabled
+                      ? "启动本程序时自动拉起这个服务；勾选时若它没在跑，会立即拉起"
+                      : "总开关已关闭")
             } else {
                 Text("只读监控")
                     .font(.system(size: 9))

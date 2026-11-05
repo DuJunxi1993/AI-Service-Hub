@@ -98,8 +98,10 @@ final class PlatformRowColorTests: XCTestCase {
     /// 时间戳是新的）和 weixin（长时间没动）虽然都是 connected，
     /// 却显示成不同颜色。
     func testBothConnectedRowsShareTheSameState() {
-        let fresh = "2026-11-03T09:58:54.688228+00:00"
-        let old = "2026-11-03T08:41:17.683840+00:00"
+        // 时间戳必须相对「现在」算 —— 用固定日期的话，日历一翻篇
+        // 两个时刻就会落进同一个显示区间（例如都变成「1 天前」），断言失效。
+        let fresh = Self.iso8601(Date().addingTimeInterval(-5 * 60))
+        let old = Self.iso8601(Date().addingTimeInterval(-3 * 3600))
 
         let freshNote = ProbeEvaluator.relativeTimeDescription(from: fresh)
         let oldNote = ProbeEvaluator.relativeTimeDescription(from: old)
@@ -111,6 +113,13 @@ final class PlatformRowColorTests: XCTestCase {
         XCTAssertEqual(state(forPlatformState: "connected"), ProbeState.ok)
         // 备注能区分出时间的远近
         XCTAssertNotEqual(freshNote, oldNote)
+    }
+
+    /// 生成 ISO8601 时间戳
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     func testDisconnectedIsMarkedFailed() {
