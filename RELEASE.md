@@ -6,7 +6,7 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 ## 📥 Latest Release
 
-### v2.0.2 — 2026-11-05 · 🐛 勾选自动拉起立即生效
+### v2.0.3 — 2026-11-05 · 🐛 「停止」按钮对进程服务失效
 
 **最低系统**: macOS 26 Tahoe (Apple Silicon) · **架构**: arm64
 
@@ -14,13 +14,13 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
-| `AiServiceHub-2.0.2.dmg` | 1.5 MB | `ce0f4eb283cf1722d8a079631bd58a18527ecaf1be70da348a7b5b122d681e7a` |
-| `AiServiceHub-2.0.2-macOS.zip` | 1.1 MB | `830515923d76b9f3ff5fcd598facdb90382b54498b9eb224df5925804722c6d8` |
+| `AiServiceHub-2.0.3.dmg` | 1.5 MB | `6d847e4dabf4f55dd5abfda86a10e5cade6aefa0fd350cb002dc755a7ed02e51` |
+| `AiServiceHub-2.0.3-macOS.zip` | 1.1 MB | `6cbc948333685f68c494ccf4fa50516e5aae4049fab6a077bad1897847a54a87` |
 
-下载：[GitHub Releases · macos-v2.0.2](https://github.com/DuJunxi1993/AI-Service-Hub/releases/tag/macos-v2.0.2)
+下载：[GitHub Releases · macos-v2.0.3](https://github.com/DuJunxi1993/AI-Service-Hub/releases/tag/macos-v2.0.3)
 
-> v2.0.2 是 v2.0.1 的 bug 修复版，配置格式向后兼容，**直接覆盖安装即可**。
-> 变更详情见下方 [Changelog → v2.0.2](#v202--2026-11-05--勾选自动拉起立即生效)。
+> v2.0.3 是 v2.0.2 的 bug 修复版，配置格式向后兼容，**直接覆盖安装即可**。
+> 变更详情见下方 [Changelog → v2.0.3](#v203--2026-11-05--停止按钮对进程服务失效)。
 
 ---
 
@@ -79,6 +79,46 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 ---
 
 ## 📜 Changelog
+
+### v2.0.3 — 2026-11-05 · 「停止」按钮对进程服务失效
+
+#### 🐛 点「停止」停不掉 AstrBot
+
+容器服务（NapCat）正常，因为它走 `docker stop`，不依赖进程账本；
+可管理的**进程**服务（AstrBot）则完全停不掉。
+
+**根因**
+
+`OwnershipLedger.reclaimOrphans` 对 daemon 化的进程是**故意**丢弃所有权记录的：
+
+```swift
+if record.detached {
+    // daemon 化：保留进程，但从账本摘除
+    continue          // ← 没有 add 进 remaining
+}
+records = remaining   // detached 的记录全被清空
+```
+
+AstrBot 的 `ownership.detached = true`，所以 app 一重启，账本里就没有它了。
+而「停止」对进程服务只停账本里那一个 pid —— 账本为空，
+**一个进程都没杀**，20 秒后判定「停止超时」，服务照跑不误。
+
+**改动**
+
+「停止」改为两步：
+
+1. 停掉账本里那个进程（pid + 启动时间双重校验，最精确）
+2. **再终止该服务匹配到的全部进程** —— `ServiceDescriptor.stopPatterns`
+
+`stopPatterns` 统一了原先分散的两处语义：
+
+- 可管理的进程服务 → `ProcessSpec.processMatch` 完整列表
+  （探测只用了其中一条模式）
+- 纯监控服务 → 显式的 `stopProcessPatterns`，没有就退回探测模式
+
+顺带修好**重启** —— 它就是 stop + start，stop 空转时 start 会看到「还在运行」直接跳过。
+
+---
 
 ### v2.0.2 — 2026-11-05 · 勾选自动拉起立即生效
 
