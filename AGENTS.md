@@ -5,8 +5,9 @@ Native macOS SwiftUI control panel (SwiftPM, macOS 26+, Swift 6.2) for a set of
 local services. It is **not** a generic process supervisor: a service is either
 **observed** (read-only) or **managed** (this app starts/stops it).
 
-Branch: `macos`. This repo is an umbrella — `main` and `windows-wsl` exist for
-other platforms; do not push macOS-only changes elsewhere.
+Branch: `main` — the only branch. This repo is **macOS-only**; the former
+Windows/WSL version and the umbrella layout were removed, so there is no
+other branch to push to.
 
 ## Build / run
 

@@ -17,7 +17,7 @@ macOS 端的发布记录。最新版本在顶部，历史变更在下方按时�
 | `AiServiceHub-2.0.2.dmg` | 1.5 MB | `ce0f4eb283cf1722d8a079631bd58a18527ecaf1be70da348a7b5b122d681e7a` |
 | `AiServiceHub-2.0.2-macOS.zip` | 1.1 MB | `830515923d76b9f3ff5fcd598facdb90382b54498b9eb224df5925804722c6d8` |
 
-下载：[GitHub Releases · macos-v2.0.2](https://github.com/DuJunxi1993/AstrbotLauncher/releases/tag/macos-v2.0.2)
+下载：[GitHub Releases · macos-v2.0.2](https://github.com/DuJunxi1993/AI-Service-Hub/releases/tag/macos-v2.0.2)
 
 > v2.0.2 是 v2.0.1 的 bug 修复版，配置格式向后兼容，**直接覆盖安装即可**。
 > 变更详情见下方 [Changelog → v2.0.2](#v202--2026-11-05--勾选自动拉起立即生效)。
