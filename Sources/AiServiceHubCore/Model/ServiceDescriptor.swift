@@ -89,6 +89,25 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         autoStart && !old.autoStart && lifecycle == .managed
     }
 
+    /// 「停止」时应当终止的进程匹配模式
+    ///
+    /// 停止要**全面**，探测要**精确** —— 两者故意分开：
+    ///
+    /// - 可管理的进程服务：用 `ProcessSpec` 里完整的 `processMatch`
+    ///   （AstrBot 的探测只用一条模式，而实际命令行可能匹配另一条）
+    /// - 纯监控服务：用显式配置的 `stopProcessPatterns`，没有就退回探测模式
+    public var stopPatterns: [String] {
+        switch lifecycle {
+        case .managed:
+            if case .process(let spec) = managed, !spec.processMatch.isEmpty {
+                return spec.processMatch
+            }
+            return processPatterns
+        case .observed:
+            return stopProcessPatterns ?? processPatterns
+        }
+    }
+
     /// 该服务相关的进程匹配模式（来自探测配置）
     ///
     /// 用于「停止全部相关进程」——纯监控服务没有驱动，
@@ -100,9 +119,4 @@ public struct ServiceDescriptor: Identifiable, Codable, Sendable, Hashable {
         }
     }
 
-    /// 「停止全部进程」实际使用的模式
-    public var effectiveStopPatterns: [String] {
-        let explicit = stopProcessPatterns ?? []
-        return explicit.isEmpty ? processPatterns : explicit
-    }
 }

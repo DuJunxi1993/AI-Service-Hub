@@ -341,9 +341,23 @@ final class AppModel: ObservableObject {
         do {
             switch descriptor.managed {
             case .process:
+                // 先停掉本程序持有的那个进程（pid + 启动时间双重校验，最精确）
                 if let record = settings.ledgerRecord(for: id) {
                     await processDriver.stop(record: record)
                     settings.removeLedgerRecord(serviceID: id)
+                }
+                // 再把该服务匹配到的**全部**进程停掉。
+                //
+                // 只停账本里那一个 pid 是不够的：daemon 化的进程在 app 重启后
+                // 会从账本里摘除（reclaimOrphans 故意丢弃 detached 条目），
+                // 这时按账本停等于什么都不做 —— 服务照跑不误，
+                // 用户点「停止」看着就像没反应。
+                let patterns = descriptor.stopPatterns
+                if !patterns.isEmpty {
+                    let terminated = await processDriver.terminateAll(matching: patterns)
+                    if !terminated.isEmpty {
+                        AppLog.info("\(descriptor.name)：终止了 \(terminated.count) 个匹配进程")
+                    }
                 }
 
             case .container(let spec):
@@ -369,7 +383,7 @@ final class AppModel: ObservableObject {
     func stopAllProcesses(of id: UUID) async {
         guard let descriptor = settings.service(id: id) else { return }
         // 用「停止专用」模式：比探测模式全面（Hermes 的进程散落在多处）
-        let patterns = descriptor.effectiveStopPatterns
+        let patterns = descriptor.stopPatterns
         guard !patterns.isEmpty else {
             errorMessage = "\(descriptor.name) 没有配置进程匹配规则，无法停止"
             return
@@ -392,7 +406,7 @@ final class AppModel: ObservableObject {
     /// 当前匹配该服务停止规则的进程数量（用于确认对话框）
     func matchingProcessCount(for id: UUID) -> Int {
         guard let descriptor = settings.service(id: id) else { return 0 }
-        let patterns = descriptor.effectiveStopPatterns
+        let patterns = descriptor.stopPatterns
         guard !patterns.isEmpty else { return 0 }
         return processTableCache.matching(patterns).count
     }

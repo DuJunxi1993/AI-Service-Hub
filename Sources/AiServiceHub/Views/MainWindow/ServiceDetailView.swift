@@ -90,7 +90,7 @@ struct ServiceDetailView: View {
 
     /// 终止前的说明
     private var stopAllWarning: String {
-        let patterns = descriptor.effectiveStopPatterns
+        let patterns = descriptor.stopPatterns
         let matched = appModel.matchingProcessCount(for: descriptor.id)
         var text = "将终止匹配以下规则的进程：\n\(patterns.joined(separator: "\n"))"
         text += "\n\n当前匹配到 \(matched) 个进程。此操作不可撤销。"
@@ -383,12 +383,12 @@ struct ServiceDetailView: View {
                     Label("停止全部进程", systemImage: "xmark.octagon.fill")
                 }
                 .buttonStyle(.glass)
-                .disabled(descriptor.effectiveStopPatterns.isEmpty || snapshot.status == .stopped)
+                .disabled(descriptor.stopPatterns.isEmpty || snapshot.status == .stopped)
                 .controlSize(.large)
                 .fixedSize()
-                .help(descriptor.effectiveStopPatterns.isEmpty
+                .help(descriptor.stopPatterns.isEmpty
                       ? "该服务没有配置进程匹配规则"
-                      : "终止匹配该服务进程规则的全部进程（\(descriptor.effectiveStopPatterns.count) 条规则）")
+                      : "终止匹配该服务进程规则的全部进程（\(descriptor.stopPatterns.count) 条规则）")
             }
 
             Button {

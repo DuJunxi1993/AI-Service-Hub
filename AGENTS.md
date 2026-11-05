@@ -72,6 +72,15 @@ other branch to push to.
   Read the system state from the global `AppleInterfaceStyle` domain key
   instead (`SystemAppearance.isDark`). Note that any `UserDefaults` read
   falls back to the global domain — a custom suite cannot isolate it.
+- **Stopping a managed *process* service must not rely on the ledger alone.**
+  `OwnershipLedger.reclaimOrphans` deliberately **drops** the ownership record
+  of a `detached` process ("保留进程，但从账本摘除") — so after an app restart the
+  app no longer owns a daemonized process and `AppModel.stop` finds no record,
+  silently kills nothing, and the service keeps running while the UI reports
+  停止超时. `AppModel.stop` therefore also terminates every process matching
+  `ServiceDescriptor.stopPatterns` (the full `ProcessSpec.processMatch`, which
+  is deliberately wider than the single probe pattern). Stopping must be
+  *comprehensive*; probing must stay *precise*.
 - **Never use `pgrep` to find processes.** On macOS 27 it misses processes
   spawned by GUI apps (verified: `pgrep -f "dsh web"` returns nothing while
   `ps -A` shows it). Use `ProcessInspector.snapshot()` and match in memory.
