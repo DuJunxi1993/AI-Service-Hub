@@ -81,6 +81,14 @@ other branch to push to.
   `ServiceDescriptor.stopPatterns` (the full `ProcessSpec.processMatch`, which
   is deliberately wider than the single probe pattern). Stopping must be
   *comprehensive*; probing must stay *precise*.
+- **Closing the window must resign the frontmost app.** macOS convention
+  (Finder): an app whose last window is closed keeps running but **gives up the
+  frontmost role** — otherwise Stage Manager reserves an empty stage for it and
+  the menu bar keeps showing the app's name. `AppDelegate` observes
+  `NSWindow.willCloseNotification` and calls `NSApp.hide(nil)` once no real
+  window (bigger than 200×200 — SwiftUI keeps several visible 34×30 template
+  windows around) is left. `orderOut` alone is *not* enough: it hides the
+  window but the app stays active.
 - **Never use `pgrep` to find processes.** On macOS 27 it misses processes
   spawned by GUI apps (verified: `pgrep -f "dsh web"` returns nothing while
   `ps -A` shows it). Use `ProcessInspector.snapshot()` and match in memory.

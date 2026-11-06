@@ -65,14 +65,17 @@ final class MenuBarController: ObservableObject {
     }
 
     private func toggleMainWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-
-        if let window = NSApp.windows.first(where: { $0.title.contains("AI Service Hub") }) {
-            if window.isVisible && window.isKeyWindow {
-                window.orderOut(nil)
-                return
-            }
+        // 先判断可见性再激活 —— 反过来的话，activate 会触发
+        // applicationDidBecomeActive → openWindow，窗口刚被唤起就被判定为「已显示」
+        // 而收起，点了没反应。
+        if let window = NSApp.windows.first(where: { $0.title.contains("AI Service Hub") }),
+           window.isVisible {
+            window.orderOut(nil)
+            // 收起后要让出前台，否则台前调度会留一个空舞台、菜单栏也还挂着 app 名
+            NSApp.hide(nil)
+            return
         }
+        NSApp.activate(ignoringOtherApps: true)
         NotificationCenter.default.post(name: .showMainWindow, object: nil)
     }
 

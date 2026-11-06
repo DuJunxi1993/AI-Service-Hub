@@ -101,6 +101,8 @@ extension ThemeMode {
 /// AppDelegate - 处理启动时最小化、菜单栏、退出清理
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didCleanUp = false
+    /// 窗口关闭通知的观察者
+    private var windowCloseObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 激活应用（必须在所有窗口设置之前）
@@ -131,16 +133,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Dock 图标跟随系统明暗（macOS 只有运行中的图标能变）
         AppIconController.shared.start()
+
+
+
+        // 主窗口关闭 → 让出前台（见 resignFrontmostIfNoWindowVisible）
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title.contains("AI Service Hub") else { return }
+            self?.resignFrontmostIfNoWindowVisible()
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        for window in NSApp.windows where window.title.contains("AI Service Hub") {
-            window.makeKeyAndOrderFront(nil)
+        // 窗口可能已经被**关闭**（close），而 orderFront 对已关闭的 NSWindow 无效，
+        // 会得到一个「唤不回来」的空窗口。统一走 openWindow ——
+        // 它由 SwiftUI 场景负责，能正确重建/重显。
+        NotificationCenter.default.post(name: .showMainWindow, object: nil)
+    }
+
+    /// 主窗口关闭后：app 继续在后台跑，但**要让出前台**
+    ///
+    /// macOS 的惯例（Finder 为例）：关掉全部窗口后 app 仍在运行，
+    /// 但会卸下前台身份 —— 否则台前调度会为它留一个空舞台，
+    /// 菜单栏也还挂着这个 app 的名字。
+    ///
+    /// 这里用 `NSApp.hide(nil)` 而不是单纯 orderOut：
+    /// 只有 hide 才会让 app 退出前台状态。
+    private func resignFrontmostIfNoWindowVisible() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // 只认「有实际尺寸的窗口」—— SwiftUI 场景内部还有几个 34×30 的
+            // 模板窗口，它们 visible=true 但不是用户看到的窗口。
+            let hasRealWindow = NSApp.windows.contains {
+                $0.isVisible && $0.frame.width > 200 && $0.frame.height > 200
+            }
+            guard !hasRealWindow else { return }
+            NSApp.hide(nil)
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false  // 主窗口关闭时不退出（菜单栏仍可用）
+    }
+
+    deinit {
+        if let windowCloseObserver {
+            NotificationCenter.default.removeObserver(windowCloseObserver)
+        }
     }
 
     /// 退出前先做清理（需要 await，因此推迟真正退出）
