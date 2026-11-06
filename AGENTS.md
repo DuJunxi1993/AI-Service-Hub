@@ -100,6 +100,20 @@ other branch to push to.
   of real lines — median 145 bytes, p90 579) and `LogHub` additionally enforces
   a byte budget per source. Level detection and WebUI-URL extraction still run
   on the **raw** line.
+- **Log tailing is lazy — the app is a viewer, not a supervisor.**
+  `LogHub.attach` only *registers* a source; the `LogTailer` is created by
+  `startTailing` when the **first subscriber** arrives and torn down by
+  `stopTailing` when the last one leaves. `InlineLogView` subscribes only while
+  `AppModel.isMainWindowVisible` is true, because **hiding a window does not
+  destroy its SwiftUI views** (`onDisappear` never fires) — the AppDelegate
+  re-evaluates `isVisible && !isMiniaturized` on
+  `didBecomeKey` / `didMiniaturize` / `didDeminiaturize` / `willClose` /
+  `didHide` / `didUnhide` and pushes the result through `setMainWindowVisible`.
+  Without this the app would stat every log file once a second and spawn a
+  `docker logs` process every two seconds for nobody.
+  The WebUI address still needs the log (NapCat's URL carries a token), so
+  `LogHub.probeWebUIURL` scans the history **once** — at startup and after
+  starting a service — instead of keeping a tailer alive for it.
 - **Tail a log file, do not scroll to a row id.** `ScrollViewReader.scrollTo`
   cannot resolve a row that `LazyVStack` has not materialized yet, so it scrolls
   to an *estimated* position: the log lands mid-list, each new line causes a

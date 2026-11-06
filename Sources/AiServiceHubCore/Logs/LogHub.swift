@@ -16,6 +16,9 @@ public actor LogHub {
     }
 
     private struct SourceState {
+        /// 来源规格（跟随器按需创建）
+        var spec: LogSourceSpec
+        /// 常驻跟随器 —— **只在有人订阅日志时才存在**
         var tailer: LogTailer?
         var buffer: [LogLine] = []
         var sequence: Int = 0
@@ -32,6 +35,8 @@ public actor LogHub {
     private let bufferByteLimit: Int
     private var sources: [SourceKey: SourceState] = [:]
     private var subscribers: [SourceKey: [UUID: AsyncStream<[LogLine]>.Continuation]] = [:]
+    /// 每个服务的订阅者数量 —— 归零时停止跟随
+    private var subscriberCounts: [UUID: Int] = [:]
     private var webURLs: [UUID: URL] = [:]
 
     public init(bufferLimit: Int = 2000, bufferByteLimit: Int = 4 * 1024 * 1024) {
@@ -49,12 +54,17 @@ public actor LogHub {
         let id = UUID()
 
         return AsyncStream { continuation in
+            for sourceKey in sourceKeys(for: serviceID) {
+                subscribers[sourceKey, default: [:]][id] = continuation
+            }
+            subscriberCounts[serviceID, default: 0] += 1
+            // 第一个订阅者 → 开始跟随（历史也会顺着这条流推下来）
+            if subscriberCounts[serviceID] == 1 {
+                startTailing(serviceID: serviceID)
+            }
             let existing = allBufferedLines(serviceID: serviceID)
             if !existing.isEmpty {
                 continuation.yield(existing)
-            }
-            for sourceKey in sourceKeys(for: serviceID) {
-                subscribers[sourceKey, default: [:]][id] = continuation
             }
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.removeSubscriber(id: id, serviceID: serviceID) }
@@ -68,6 +78,12 @@ public actor LogHub {
             if subscribers[sourceKey]?.isEmpty == true {
                 subscribers[sourceKey] = nil
             }
+        }
+        let remaining = max(0, (subscriberCounts[serviceID] ?? 0) - 1)
+        subscriberCounts[serviceID] = remaining
+        // 没人看了 → 停掉跟随，别在后台空转
+        if remaining == 0 {
+            stopTailing(serviceID: serviceID)
         }
     }
 
@@ -85,21 +101,51 @@ public actor LogHub {
 
     // MARK: - 来源管理
 
-    /// 为一个服务挂上它的所有日志来源
+    /// 登记一个服务的所有日志来源
+    ///
+    /// **只登记，不开始跟随** —— 跟随器是按需创建的：
+    /// 本程序本质上是个**查看器**，日志只有在用户打开日志面板时才有意义。
+    /// 没有订阅者时不该在后台每秒 stat 文件、每两秒起一个 docker 进程。
     public func attach(descriptor: ServiceDescriptor) {
         for spec in descriptor.logSources {
             let key = SourceKey(serviceID: descriptor.id, sourceID: spec.id)
-            guard sources[key]?.tailer == nil else { continue }
+            guard sources[key] == nil else { continue }
+            sources[key] = SourceState(spec: spec, webUIKind: spec.webUIKind)
+        }
+    }
 
-            let webUIKind = spec.webUIKind
-            let tailer = LogTailer(spec: spec) { [weak self] lines in
+    /// 开始跟随某个服务的所有来源
+    private func startTailing(serviceID: UUID) {
+        for key in sourceKeys(for: serviceID) {
+            guard var state = sources[key], state.tailer == nil else { continue }
+
+            let webUIKind = state.webUIKind
+            let label = state.spec.label
+            let tailer = LogTailer(spec: state.spec) { [weak self] lines in
                 Task { await self?.ingest(lines: lines, key: key, webUIKind: webUIKind) }
             } onStateChange: { _ in }
 
-            sources[key] = SourceState(tailer: tailer, webUIKind: webUIKind)
+            state.tailer = tailer
+            sources[key] = state
             tailer.start()
-            AppLog.info("日志来源已挂载：\(descriptor.name) / \(spec.label)")
+            AppLog.info("开始跟随日志：\(label)")
         }
+    }
+
+    /// 停止跟随某个服务的所有来源
+    ///
+    /// 缓冲一并清掉：跟随器重启时会重新吐出历史，
+    /// 留着旧缓冲只会让同一段日志出现两遍。
+    private func stopTailing(serviceID: UUID) {
+        for key in sourceKeys(for: serviceID) {
+            guard var state = sources[key] else { continue }
+            state.tailer?.stop()
+            state.tailer = nil
+            state.buffer = []
+            state.bytes = 0
+            sources[key] = state
+        }
+        AppLog.info("停止跟随日志（已无订阅者）")
     }
 
     /// 停止某个服务的所有日志来源
@@ -108,6 +154,28 @@ public actor LogHub {
             sources[key]?.tailer?.stop()
             sources[key] = nil
             subscribers[key] = nil
+        }
+        subscriberCounts[serviceID] = nil
+    }
+
+    /// 一次性扫描历史，找出服务的 WebUI 地址
+    ///
+    /// 「打开 WebUI」按钮不能等用户打开日志面板才有地址可用
+    /// （NapCat 的地址带 token，只存在于容器日志里），所以这里单独扫一次 ——
+    /// 只读一次历史，不建立常驻跟随。
+    public func probeWebUIURL(for descriptor: ServiceDescriptor) {
+        for spec in descriptor.logSources {
+            guard let kind = spec.webUIKind else { continue }
+            let tailer = LogTailer(spec: spec) { _ in } onStateChange: { _ in }
+            for line in tailer.readHistoryLines() {
+                if let url = WebUIURLDetector.extract(from: line, for: kind) {
+                    if webURLs[descriptor.id] != url {
+                        AppLog.info("探测到 WebUI 地址（\(spec.label)）：\(url.absoluteString)")
+                    }
+                    webURLs[descriptor.id] = url
+                    break
+                }
+            }
         }
     }
 

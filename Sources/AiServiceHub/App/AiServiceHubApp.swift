@@ -146,6 +146,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   window.title.contains("AI Service Hub") else { return }
             self?.resignFrontmostIfNoWindowVisible()
         }
+
+        // 窗口显隐 → 日志跟随的启停
+        observeWindowVisibility()
+        syncWindowVisibility()
+        // 启动时可能最小化，等窗口安置好再求一次
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            self.syncWindowVisibility()
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -172,6 +180,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard !hasRealWindow else { return }
             NSApp.hide(nil)
+        }
+    }
+
+    /// 主窗口是否真正显示着（没关闭、没隐藏、没最小化）
+    ///
+    /// 最小化也算「没显示」—— 用户没在看，日志就没有跟随的必要。
+    private var mainWindowIsShown: Bool {
+        NSApp.windows.contains {
+            $0.title.contains("AI Service Hub") && $0.isVisible && !$0.isMiniaturized
+        }
+    }
+
+    /// 窗口显隐变化时同步标志 —— 日志跟随靠它启停
+    private func syncWindowVisibility() {
+        let shown = mainWindowIsShown
+        MainActor.assumeIsolated {
+            AppModel.shared.setMainWindowVisible(shown)
+        }
+    }
+
+    /// 监听窗口显隐（收起 / 显示 / 最小化 / 还原）
+    ///
+    /// 不依赖通知的语义，一律**重新求值**实际状态 —— 各通知的触发时机不一致，
+    /// 只信 `isVisible && !isMiniaturized`。
+    private func observeWindowVisibility() {
+        let names: [Notification.Name] = [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.willCloseNotification,
+            NSApplication.didHideNotification,
+            NSApplication.didUnhideNotification,
+        ]
+        for name in names {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.syncWindowVisibility()
+            }
         }
     }
 

@@ -23,6 +23,20 @@ final class AppModel: ObservableObject {
     /// 全局错误提示
     @Published var errorMessage: String?
 
+    /// 主窗口当前是否**真正显示着**（未关闭、未隐藏、未最小化）
+    ///
+    /// 本程序本质上是个**查看器**：日志只有在用户看着面板时才有意义。
+    /// 窗口收起后 SwiftUI 的视图**不会销毁**（`onDisappear` 不触发），
+    /// 所以必须由这个标志来决定还要不要继续跟随日志文件。
+    @Published private(set) var isMainWindowVisible: Bool = false
+
+    /// 由 AppDelegate 在窗口显隐变化时调用
+    func setMainWindowVisible(_ visible: Bool) {
+        guard visible != isMainWindowVisible else { return }
+        isMainWindowVisible = visible
+        AppLog.info(visible ? "主窗口已显示 —— 恢复跟随日志" : "主窗口已收起 —— 停止跟随日志")
+    }
+
     /// 日志中心
     let hub: LogHub
 
@@ -63,6 +77,11 @@ final class AppModel: ObservableObject {
             let reclaimed = await settings.reclaimOrphanProcesses(using: ledger)
             if !reclaimed.isEmpty {
                 AppLog.info("已回收 \(reclaimed.count) 个孤儿进程")
+            }
+            // WebUI 地址只存在于日志里（NapCat 的地址还带 token），
+            // 所以启动时**一次性**扫一遍历史 —— 不建立常驻跟随。
+            for descriptor in settings.orderedServices {
+                await hub.probeWebUIURL(for: descriptor)
             }
             await refreshAll()
             await autoStartEnabledServices()
@@ -319,6 +338,10 @@ final class AppModel: ObservableObject {
             case nil:
                 break
             }
+
+            // 容器重启后 WebUI 的 token 会变（NapCat 的地址只存在于日志里），
+            // 启动完再扫一次历史把新地址捞出来。
+            await hub.probeWebUIURL(for: descriptor)
 
             await refreshAllNow()
             NotificationManager.shared.send(title: "服务启动", body: "\(descriptor.name) 已启动")

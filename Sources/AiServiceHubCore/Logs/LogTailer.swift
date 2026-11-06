@@ -158,6 +158,38 @@ public final class LogTailer: @unchecked Sendable {
         onStateChange(.following)
     }
 
+    /// 一次性读取历史行（**不**建立常驻跟随）
+    ///
+    /// 用于「服务启动后探测一次 WebUI 地址」——那种场景只需要扫一眼历史，
+    /// 不值得为它常驻一个 tailer（文件每秒一次 stat，容器每两秒起一个 docker 进程）。
+    public func readHistoryLines() -> [String] {
+        switch spec.kind {
+        case .file, .filePattern:
+            guard let url = resolveURL() else { return [] }
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return [] }
+            let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+            let start = size > UInt64(historyByteLimit) ? size - UInt64(historyByteLimit) : 0
+            guard size > start, let data = readRange(url: url, from: start, to: size) else { return [] }
+            let text = String(data: data, encoding: .utf8) ?? ""
+            var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            // 丢掉可能不完整的首行
+            if start > 0, let first = lines.first, !text.hasPrefix("\n") {
+                lines.removeFirst()
+            }
+            return lines
+
+        case .dockerLogs(let containerName):
+            guard let docker = ExecutableLocator.shared.which("docker") else { return [] }
+            let output = runSync(docker, arguments: ["logs", "--tail", "500", containerName])
+            guard output.exitCode == 0 else { return [] }
+            return output.stdout.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+
+        case .command:
+            // 子进程来源只能靠常驻跟随读取，没有历史可言
+            return []
+        }
+    }
+
     private func readRange(url: URL, from: UInt64, to: UInt64) -> Data? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }

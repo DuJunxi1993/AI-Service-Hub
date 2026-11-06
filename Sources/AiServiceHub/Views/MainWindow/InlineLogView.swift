@@ -45,10 +45,13 @@ struct InlineLogView: View {
         .padding(.horizontal, isExpanded ? 0 : 12)
         .padding(.bottom, isExpanded ? 0 : 4)
         .padding(.top, isExpanded ? 6 : 4)
-        .onAppear { subscribe() }
+        .onAppear { syncSubscription(visible: appModel.isMainWindowVisible) }
         .onDisappear { cancelSubscription() }
+        .onChange(of: appModel.isMainWindowVisible) { _, visible in
+            syncSubscription(visible: visible)
+        }
         .onChange(of: descriptor.id) { _, _ in
-            subscribe()
+            syncSubscription(visible: appModel.isMainWindowVisible)
         }
         .onChange(of: searchText) { _, _ in
             applyFilter()
@@ -213,13 +216,9 @@ struct InlineLogView: View {
     private func subscribe() {
         cancelSubscription()
         streamTask = Task {
-            // 先取一次历史（Hub 里已经缓存，不会重复）
-            let history = await appModel.hub.history(serviceID: descriptor.id)
-            await MainActor.run {
-                allLines = history
-                applyFilter()
-            }
-            // 再持续接收
+            // 只订阅即可：跟随器是**按订阅创建的**，
+            // 它的首次轮询会把历史也顺着这条流推下来。
+            // （面板一关，订阅结束 → 跟随停止 → 后台不再轮询日志文件）
             for await batch in await appModel.hub.subscribe(serviceID: descriptor.id) {
                 await MainActor.run {
                     guard !isPaused else { return }
@@ -230,6 +229,20 @@ struct InlineLogView: View {
                     applyFilter()
                 }
             }
+        }
+    }
+
+    /// 按窗口显隐启停跟随
+    ///
+    /// 视图在窗口收起时**不会销毁**（`onDisappear` 不触发），
+    /// 所以要靠 `isMainWindowVisible` 判断用户是不是还在看面板。
+    private func syncSubscription(visible: Bool) {
+        if visible {
+            subscribe()
+        } else {
+            cancelSubscription()
+            allLines = []
+            cachedLines = []
         }
     }
 
