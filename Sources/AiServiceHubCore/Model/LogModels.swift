@@ -25,6 +25,29 @@ public enum LogLevel: String, Sendable, Hashable, CaseIterable {
 
 /// 一行日志
 public struct LogLine: Identifiable, Sendable, Hashable {
+
+    /// 单行内容的存储上限（字符数）
+    ///
+    /// 有些服务会把整个请求 dump 进一行 —— AstrBot 的
+    /// `anthropic._base_client` DEBUG 日志会把系统提示词连同全部工具定义
+    /// 一并打出来，**单行能到 1.3 MB**（实测 `~/data/logs/astrbot.log`
+    /// 共 10.8 MB / 1235 行，最长的几行都是 1.3 MB）。
+    ///
+    /// 不截断的后果有两个：
+    /// - SwiftUI 渲染不了这么大的 `Text`，日志面板会变成**一片空白**
+    ///   （行还在、背景还在，就是没有字）；
+    /// - 2000 行的环形缓冲会吃掉 2.6 GB 内存。
+    ///
+    /// 2000 字符能覆盖 95% 以上的正常日志行（中位数 145 字节，p90 579 字节）。
+    public static let maxContentLength = 2000
+
+    /// 截断超长的一行
+    public static func truncateContent(_ content: String) -> String {
+        guard content.count > maxContentLength else { return content }
+        let head = content.prefix(maxContentLength)
+        return String(head) + "…（已截断，原文 \(content.count) 字符）"
+    }
+
     public let id: UUID
     /// 在所属来源内单调递增的序号，用于订阅游标
     public let sequence: Int

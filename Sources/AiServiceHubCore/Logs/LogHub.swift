@@ -20,15 +20,23 @@ public actor LogHub {
         var buffer: [LogLine] = []
         var sequence: Int = 0
         var webUIKind: WebUIKind?
+        /// 缓冲占用的字节数（估算），用于按字节淘汰
+        var bytes: Int = 0
     }
 
     private let bufferLimit: Int
+    /// 单个来源的缓冲字节上限
+    ///
+    /// 行数上限本身挡不住内存：`LogLine.maxContentLength` 之后一行最多 2000 字符，
+    /// 2000 行仍然可能有几 MB，再乘以来源数就上不封顶了。这里再加一道字节闸。
+    private let bufferByteLimit: Int
     private var sources: [SourceKey: SourceState] = [:]
     private var subscribers: [SourceKey: [UUID: AsyncStream<[LogLine]>.Continuation]] = [:]
     private var webURLs: [UUID: URL] = [:]
 
-    public init(bufferLimit: Int = 2000) {
+    public init(bufferLimit: Int = 2000, bufferByteLimit: Int = 4 * 1024 * 1024) {
         self.bufferLimit = bufferLimit
+        self.bufferByteLimit = bufferByteLimit
     }
 
     // MARK: - 订阅
@@ -135,19 +143,31 @@ public actor LogHub {
 
         for line in lines {
             state.sequence += 1
+            // 级别判定用**原始**行（关键字可能在行尾），存储时才截断。
+            // WebUI 地址提取同样用原始行（见下方），不受截断影响。
+            let content = LogLine.truncateContent(line)
             batch.append(LogLine(
                 sequence: state.sequence,
                 timestamp: now,
                 level: LogLevel.detect(from: line),
                 serviceID: key.serviceID,
                 sourceID: key.sourceID,
-                content: line
+                content: content
             ))
+            state.bytes += content.utf8.count
         }
 
         state.buffer.append(contentsOf: batch)
+        // 按行数淘汰
         if state.buffer.count > bufferLimit {
-            state.buffer.removeFirst(state.buffer.count - bufferLimit)
+            let drop = state.buffer.count - bufferLimit
+            state.bytes -= state.buffer.prefix(drop).reduce(0) { $0 + $1.content.utf8.count }
+            state.buffer.removeFirst(drop)
+        }
+        // 再按字节淘汰（单行超长时行数上限挡不住）
+        while state.bytes > bufferByteLimit, !state.buffer.isEmpty {
+            let dropped = state.buffer.removeFirst()
+            state.bytes -= dropped.content.utf8.count
         }
         sources[key] = state
 

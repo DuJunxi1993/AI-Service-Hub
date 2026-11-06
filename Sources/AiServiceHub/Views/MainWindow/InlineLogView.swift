@@ -22,6 +22,8 @@ struct InlineLogView: View {
     @State private var isPaused: Bool = false
     /// 是否自动跟随到最新一行
     @State private var followsTail: Bool = true
+    /// 滚动位置（绑定到最新一行的 id）
+    @State private var scrollPosition: LogLine.ID?
     @State private var streamTask: Task<Void, Never>?
 
     private static let bufferLimit = 2000
@@ -165,39 +167,45 @@ struct InlineLogView: View {
     // MARK: - 内容
 
     private var content: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if cachedLines.isEmpty {
-                        EmptyLogView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
-                    } else {
-                        ForEach(cachedLines) { line in
-                            LogRowView(line: line, compact: !isExpanded)
-                                .id(line.id)
-                        }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if cachedLines.isEmpty {
+                    EmptyLogView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    ForEach(cachedLines) { line in
+                        LogRowView(line: line, compact: !isExpanded)
+                            .id(line.id)
                     }
                 }
-                .padding(.vertical, 4)
             }
-            // 跟随最新：监听**最后一行**而不是行数 ——
-            // 缓冲区满了（2000 行）之后行数不再变化，
-            // 监听 count 就再也收不到通知了，日志会停在原地不跟随。
-            .onChange(of: cachedLines.last?.id) { _, _ in
-                scrollToBottom(proxy)
-            }
-            .onAppear {
-                scrollToBottom(proxy)
-            }
+            .padding(.vertical, 4)
+        }
+        // 用**声明式**的滚动位置绑定，而不是 ScrollViewReader.scrollTo。
+        //
+        // scrollTo 是命令式的跳转：目标行在 LazyVStack 里还没被实例化，
+        // SwiftUI 只能滚到**估算**位置 —— 结果就是滚动条停在中间而不是底部；
+        // 而且每次跳转都带动画，新行不断到来时动画被反复打断，表现为整屏闪烁。
+        //
+        // scrollPosition 是绑定：SwiftUI 负责把位置维持在那一行上，
+        // 内容增长时会自己跟上，既不闪也不会落到中间。
+        .scrollPosition(id: $scrollPosition, anchor: .bottom)
+        // 跟随最新：监听**最后一行**而不是行数 ——
+        // 缓冲区满了（2000 行）之后行数不再变化，
+        // 监听 count 就再也收不到通知了，日志会停在原地不跟随。
+        .onChange(of: cachedLines.last?.id) { _, _ in
+            scrollToBottom()
+        }
+        .onAppear {
+            scrollToBottom()
         }
     }
 
     /// 滚动到底部
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom() {
         guard followsTail, !isPaused else { return }
-        guard let last = cachedLines.last else { return }
-        proxy.scrollTo(last.id, anchor: .bottom)
+        scrollPosition = cachedLines.last?.id
     }
 
     // MARK: - 订阅
@@ -281,7 +289,10 @@ struct LogRowView: View {
             Text(line.content)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(textColor)
-                .lineLimit(nil)
+                // 行高封顶：采集侧已把单行截到 2000 字符，但窄栏里仍会折成
+                // 三十多行，一行就能把面板占满、后续日志全被顶出视口。
+                .lineLimit(8)
+                .truncationMode(.tail)
                 .textSelection(.enabled)
 
             Spacer(minLength: 0)

@@ -89,6 +89,23 @@ other branch to push to.
   window (bigger than 200×200 — SwiftUI keeps several visible 34×30 template
   windows around) is left. `orderOut` alone is *not* enough: it hides the
   window but the app stays active.
+- **Log lines must be truncated on ingest.** Some services dump a whole request
+  into one line — AstrBot's `anthropic._base_client` DEBUG log writes the
+  system prompt plus every tool definition as **one 1.3 MB line**
+  (`~/data/logs/astrbot.log` is 10.8 MB across only 1235 lines). An untruncated
+  `Text` of that size does not render in SwiftUI (the panel shows a uniform
+  background with **no text at all**), the row becomes tall enough to push the
+  rest of the log out of the viewport, and 2000 buffered lines would cost
+  2.6 GB. `LogLine.truncateContent` caps a line at 2000 characters (covers 95%
+  of real lines — median 145 bytes, p90 579) and `LogHub` additionally enforces
+  a byte budget per source. Level detection and WebUI-URL extraction still run
+  on the **raw** line.
+- **Tail a log file, do not scroll to a row id.** `ScrollViewReader.scrollTo`
+  cannot resolve a row that `LazyVStack` has not materialized yet, so it scrolls
+  to an *estimated* position: the log lands mid-list, each new line causes a
+  visible jump, and the panel can end up showing blank space below the last
+  row. Use `.scrollPosition(id:anchor:)` — a binding SwiftUI maintains as the
+  content grows.
 - **Never use `pgrep` to find processes.** On macOS 27 it misses processes
   spawned by GUI apps (verified: `pgrep -f "dsh web"` returns nothing while
   `ps -A` shows it). Use `ProcessInspector.snapshot()` and match in memory.
