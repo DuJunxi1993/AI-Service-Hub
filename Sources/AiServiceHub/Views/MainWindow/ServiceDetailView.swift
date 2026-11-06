@@ -1,16 +1,22 @@
 import SwiftUI
 import AiServiceHubCore
 
-/// 服务详情视图 - 玻璃头部 + 左侧信息/按钮 + 右侧日志面板
+/// 服务详情视图 —— 头部卡片 + 信息区 + **可收起的**日志面板
 ///
 /// 布局：
-/// - 常规：左栏放元数据、探测结果与操作按钮；右栏是**竖直**的日志面板（标题在上）
-/// - 展开：日志面板改为**横向**铺满整个下半部分
+/// - **常态**：信息区占满整块，日志只是底部一条窄条（点击才展开）
+/// - **展开**：信息区在上，日志横向铺满整个下半部分
+///
+/// 日志面板常态收起有两个好处：
+/// - 收起时 `InlineLogView` **根本不会被创建** —— 那棵两千行的
+///   `LazyVStack` 不存在，自然也不会有它的布局与重排开销
+/// - 没人看日志时不会订阅日志源 → 跟随器不启动 → 后台不轮询文件
 struct ServiceDetailView: View {
     let descriptor: ServiceDescriptor
 
     @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var settings: AppSettings
+    /// 日志面板是否展开（常态收起）
     @State private var isLogExpanded: Bool = false
     /// 「停止全部进程」的二次确认
     @State private var showsStopAllConfirmation: Bool = false
@@ -19,55 +25,48 @@ struct ServiceDetailView: View {
         appModel.snapshots[descriptor.id] ?? ServiceSnapshot(descriptorID: descriptor.id)
     }
 
-    /// 详情区窄于此宽度时，日志改为横向铺满（否则两个面板会互相挤掉）
-    private static let horizontalLogThreshold: CGFloat = 560
-
     var body: some View {
         GeometryReader { geometry in
-            let stackVertically = isLogExpanded || geometry.size.width < Self.horizontalLogThreshold
+            let width = geometry.size.width - 1   // 让给中间那条分隔线
 
             VStack(spacing: 0) {
+                // 标题：占整行
                 headerCard
 
                 Divider()
                     .opacity(0.2)
                     .padding(.vertical, 8)
 
-                if stackVertically {
-                    // 横向：信息在上，日志铺满整个下半部分
-                    VStack(spacing: 0) {
-                        infoPane
-                            .frame(maxHeight: .infinity)
+                // 内容：左详细信息（2 份）/ 右控制按钮（1 份）
+                HStack(spacing: 0) {
+                    infoPane
+                        .frame(width: width * 2 / 3)
 
-                        Divider()
-                            .opacity(0.2)
+                    Divider()
+                        .opacity(0.2)
 
-                        InlineLogView(
-                            descriptor: descriptor,
-                            isExpanded: true,
-                            onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = false } }
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    // 常规：左信息 / 右竖直日志
-                    //
-                    // 宽度预算：窗口最小 820 − 侧栏最小 170 = 650 给详情区，
-                    // 两个子面板的最小宽度之和（260 + 220 = 480）必须小于它，
-                    // 否则内容会被裁掉。
-                    HSplitView {
-                        infoPane
-                            .frame(minWidth: 260, idealWidth: 440, maxWidth: .infinity)
-
-                        logPane
-                            .frame(minWidth: 220, idealWidth: 400, maxWidth: 720)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    controlColumn
+                        .frame(width: width / 3)
                 }
+                .frame(minHeight: 220, maxHeight: .infinity)
 
-                Divider()
-                    .opacity(0.2)
+                // 日志：默认收起（**不渲染**，那两千行视图树就不存在）；
+                // 展开时横向占一整行
+                if isLogExpanded {
+                    Divider()
+                        .opacity(0.2)
+                    InlineLogView(
+                        descriptor: descriptor,
+                        isExpanded: true,
+                        onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = false } }
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 140, maxHeight: .infinity)
+                } else {
+                    Divider()
+                        .opacity(0.2)
+                    collapsedLogBar
+                }
 
                 StatusBarView()
             }
@@ -88,6 +87,133 @@ struct ServiceDetailView: View {
         }
     }
 
+    /// 右栏：控制按钮，纵向排布、左对齐
+    ///
+    /// 单独一栏 —— 按钮不会被长内容顶走，窗口再矮也看得见。
+    private var controlColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if descriptor.lifecycle == .managed {
+                    Button {
+                        Task { await appModel.start(descriptor.id) }
+                    } label: {
+                        Label("启动", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(Theme.startColor)
+                    .disabled(!snapshot.status.canStart)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button(role: .destructive) {
+                        Task { await appModel.stop(descriptor.id) }
+                    } label: {
+                        Label("停止", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(Theme.stopColor)
+                    .disabled(!snapshot.status.canStop)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        Task { await appModel.restart(descriptor.id) }
+                    } label: {
+                        Label("重启", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(snapshot.status == .stopped || snapshot.status == .unknown)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // 纯监控服务：没有驱动，但用户仍可能想一键停掉它
+                    Button(role: .destructive) {
+                        showsStopAllConfirmation = true
+                    } label: {
+                        Label("停止全部进程", systemImage: "xmark.octagon.fill")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(descriptor.stopPatterns.isEmpty || snapshot.status == .stopped)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(descriptor.stopPatterns.isEmpty
+                          ? "该服务没有配置进程匹配规则"
+                          : "终止匹配该服务进程规则的全部进程（\(descriptor.stopPatterns.count) 条规则）")
+                }
+
+                Button {
+                    appModel.openWebUI(descriptor.id)
+                } label: {
+                    Label("打开 WebUI", systemImage: "safari")
+                }
+                .buttonStyle(.glass)
+                .disabled(snapshot.webURL == nil)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(snapshot.webURL?.absoluteString ?? webUIUnavailableHint)
+
+                if let dataDirectory = descriptor.dataDirectory {
+                    Button {
+                        appModel.openDataDirectory(of: descriptor.id)
+                    } label: {
+                        Label("数据目录", systemImage: "folder")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help("在 Finder 中打开 \(dataDirectory)")
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 收起态的日志条 —— 点一下展开
+    ///
+    /// 收起时 `InlineLogView` **根本不会被创建**：
+    /// 那两千行的 `LazyVStack` 不存在，既没有布局开销，
+    /// 也不会订阅日志源（后台不轮询日志文件）。
+    private var collapsedLogBar: some View {
+        Button {
+            withAnimation(Theme.springAnimation) { isLogExpanded = true }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+
+                Text("实时日志")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                sourceSummary
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
+
+                Text("点击展开")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("展开实时日志面板")
+    }
+
+    /// 收起条上的来源摘要
+    private var sourceSummary: some View {
+        let labels = descriptor.logSources.map(\.label)
+        guard !labels.isEmpty else { return Text("") }
+        return Text(labels.joined(separator: " · "))
+    }
+
     /// 终止前的说明
     private var stopAllWarning: String {
         let patterns = descriptor.stopPatterns
@@ -100,7 +226,10 @@ struct ServiceDetailView: View {
         return text
     }
 
-    /// 左栏：元数据 + 探测结果 + 操作按钮
+    /// 信息区：元数据 + 探测结果 + 操作按钮
+    ///
+    /// 日志收起后这一栏占满整块宽度 —— 内容按单栏铺开，
+    /// 不再留一条限宽的窄列 + 右边一大片空白。
     private var infoPane: some View {
         GeometryReader { geometry in
             let narrow = geometry.size.width < 400
@@ -113,8 +242,6 @@ struct ServiceDetailView: View {
                         Divider().opacity(0.3)
                         probeSection
                     }
-
-                    actionButtons
 
                     if snapshot.webURL == nil, descriptor.lifecycle == .managed {
                         webUIPendingHint
@@ -144,18 +271,13 @@ struct ServiceDetailView: View {
         .padding(.top, 2)
     }
 
-    /// 右栏：竖直日志面板
-    private var logPane: some View {
-        InlineLogView(
-            descriptor: descriptor,
-            isExpanded: false,
-            onToggleExpanded: { withAnimation(Theme.springAnimation) { isLogExpanded = true } }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     // MARK: - 头部卡片
 
+    /// 标题卡片 —— 占**整行**
+    ///
+    /// 只有标题（图标 + 名称 + 状态 + 副标题）。
+    /// 控制按钮在下面的右栏，不挤在标题里 ——
+    /// 那样标题会被压缩，长服务名显示不全。
     private var headerCard: some View {
         HStack(alignment: .center, spacing: 16) {
             ZStack {
@@ -200,14 +322,14 @@ struct ServiceDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
             if let error = snapshot.lastError, snapshot.status == .error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .lineLimit(2)
-                    .frame(maxWidth: 240, alignment: .trailing)
+                    .frame(maxWidth: 300, alignment: .trailing)
             }
         }
         .padding(Theme.cardPadding)
@@ -219,6 +341,8 @@ struct ServiceDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 16)
     }
+
+
 
     private var modeBadgeText: String {
         switch descriptor.lifecycle {
@@ -337,85 +461,6 @@ struct ServiceDetailView: View {
                 ProbeResultView(result: result)
             }
         }
-    }
-
-    @ViewBuilder
-    private var actionButtons: some View {
-        // 用流式布局：按钮放不下就换行，而不是把内容撑出容器被裁掉
-        FlowLayout(spacing: 10, lineSpacing: 10, alignment: .center) {
-            if descriptor.lifecycle == .managed {
-                Button {
-                    Task { await appModel.start(descriptor.id) }
-                } label: {
-                    Label("启动", systemImage: "play.fill")
-                }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.startColor)
-                .disabled(!snapshot.status.canStart)
-                .controlSize(.large)
-                .fixedSize()
-
-                Button(role: .destructive) {
-                    Task { await appModel.stop(descriptor.id) }
-                } label: {
-                    Label("停止", systemImage: "stop.fill")
-                }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.stopColor)
-                .disabled(!snapshot.status.canStop)
-                .controlSize(.large)
-                .fixedSize()
-
-                Button {
-                    Task { await appModel.restart(descriptor.id) }
-                } label: {
-                    Label("重启", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.glass)
-                .disabled(snapshot.status == .stopped || snapshot.status == .unknown)
-                .controlSize(.large)
-                .fixedSize()
-            } else {
-                // 纯监控服务：没有驱动，但用户仍可能想一键停掉它
-                Button(role: .destructive) {
-                    showsStopAllConfirmation = true
-                } label: {
-                    Label("停止全部进程", systemImage: "xmark.octagon.fill")
-                }
-                .buttonStyle(.glass)
-                .disabled(descriptor.stopPatterns.isEmpty || snapshot.status == .stopped)
-                .controlSize(.large)
-                .fixedSize()
-                .help(descriptor.stopPatterns.isEmpty
-                      ? "该服务没有配置进程匹配规则"
-                      : "终止匹配该服务进程规则的全部进程（\(descriptor.stopPatterns.count) 条规则）")
-            }
-
-            Button {
-                appModel.openWebUI(descriptor.id)
-            } label: {
-                Label("打开 WebUI", systemImage: "safari")
-            }
-            .buttonStyle(.glassProminent)
-            .disabled(snapshot.webURL == nil)
-            .controlSize(.large)
-            .fixedSize()
-            .help(snapshot.webURL?.absoluteString ?? webUIUnavailableHint)
-
-            if let dataDirectory = descriptor.dataDirectory {
-                Button {
-                    appModel.openDataDirectory(of: descriptor.id)
-                } label: {
-                    Label("数据目录", systemImage: "folder")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.large)
-                .fixedSize()
-                .help("在 Finder 中打开 \(dataDirectory)")
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 8)
     }
 }
 

@@ -130,6 +130,20 @@ other branch to push to.
   `[weak self]` and never resumed, hanging every test.
 - **PID identity is `pid + p_starttime`** (`sysctl KERN_PROC_PID`), never pid
   alone — macOS recycles PIDs and killing the wrong process is unrecoverable.
+- **Never nest Liquid Glass inside Liquid Glass.** A `.glassEffect(...)`
+  container must not contain `.buttonStyle(.glass)` / `.glassProminent`
+  buttons — glass-on-glass renders muddy and the layers fight. Put glass
+  controls on a plain surface, or make the container a plain fill.
+  Current glass containers: the detail header card (title only, no buttons),
+  the settings cards, and the log panel's search capsule.
+- **The detail page layout is: header (full width) → two columns (2:1) →
+  log (bottom).** Left column = metadata + probe results (scrollable);
+  right column = the control buttons, stacked vertically and left-aligned, in
+  their own column so long content can never push them out of view.
+  The log panel is **collapsed by default**: collapsed, `InlineLogView` is not
+  created at all, so the 2000-row `LazyVStack` does not exist and nothing
+  subscribes to the log source. Expanded, it takes a full row under the two
+  columns.
 - **Liquid Glass calls are macOS 26 only** (`glassEffect`, `glassProminent`).
   Keep them in the view layer; `AiServiceHubCore` must stay UI-free.
 - **Package the zip with `ditto -c -k --keepParent --norsrc --noextattr`.**
