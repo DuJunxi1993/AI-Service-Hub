@@ -62,25 +62,6 @@ swift test             # 单元测试
 
 `build.sh` 会自动定位可用的 Xcode；也可以用 `DEVELOPER_DIR` 显式指定。
 
-## 首次启动
-
-由于未做 Apple Developer 签名，`build.sh` 只做 ad-hoc 签名，首次启动会被 Gatekeeper 拦截：
-
-- Finder 中右键 `AiServiceHub.app` → 打开 → 再次确认，或
-- `xattr -dr com.apple.quarantine AiServiceHub.app`
-
-### 从旧版（AstrBot Launcher）升级
-
-Bundle ID 从 `com.djx.astrbotlauncher` 变为 `com.djx.aiservicehub`，UserDefaults 因此换域。
-新版在首次启动时会**显式读取旧域**并迁移：
-
-- AstrBot 的启动模式 / 路径 / 端口 → 「可管理 · 持有子进程」
-- NapCat / Shipyard 的容器名 → 「可管理 · 委托容器」
-- 主题、轮询间隔、自启、侧边栏顺序 → 偏好设置
-
-迁移完成后旧配置仍留在磁盘上（不再读取）。建议删除 `/Applications` 里的旧 app，
-再在新版设置中重新开启「开机自动启动」。
-
 ## 项目结构
 
 ```
